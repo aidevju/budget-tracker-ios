@@ -7,18 +7,29 @@ Apple Developer account, and no Mac required.
 ## What it is
 
 - Add income and expenses with a category, optional note, and date.
-- Two screens, swapped in place (no page navigation, no router):
-  - **Month screen** (default): prev/next month navigation, a
+- Three screens, swapped in place via a bottom tab bar (no page
+  navigation, no router — no top app bar either, the tab bar is the
+  only persistent chrome):
+  - **Month** (default tab): prev/next month navigation, a
     receipt-styled balance summary, monthly expense target progress,
-    a category breakdown (expenses only), and a day-grouped
-    transaction list.
-  - **Dashboard screen** (opened via the 📊 button in the top bar):
-    top category, average daily spend, and a spending-by-category
-    pie chart (with legend) for the last-viewed month, plus a
-    6-month expense trend. Tapping a trend month jumps back to the
-    month screen on that month, for drill-down.
-- Settings: theme (light / dark / system), a currency symbol picker
-  (defaults to no symbol), and an optional monthly expense target.
+    a category breakdown (expenses only), a day-grouped transaction
+    list, and an "Export CSV" link next to the transactions header.
+  - **Dashboard**: top category, average daily spend, and a
+    spending-by-category pie chart (with legend) for the last-viewed
+    month, plus a 6-month expense trend with a "Today" link. Tapping
+    a trend month jumps back to the Month tab on that month, for
+    drill-down.
+  - **Settings**: theme (light / dark / system), a currency symbol
+    picker (defaults to no symbol), and an optional monthly expense
+    target. A full tab/screen, not a popup sheet, for consistency
+    with the other two tabs.
+- The floating "+" add-transaction button only shows on the Month
+  tab (hidden on Dashboard/Settings), positioned above the tab bar.
+- Export downloads the currently viewed month as a CSV file (summary,
+  category breakdown, then the full transaction list) — opens
+  directly in Excel, Numbers, or Google Sheets. No `.xlsx` export,
+  since a real Excel binary format needs an external library, which
+  would break the no-dependencies/fully-offline setup.
 - Fully offline-capable once installed — a service worker caches the
   app shell, and all data lives in the browser's `localStorage` on
   the user's own device. No backend, no accounts, no network calls.
@@ -34,12 +45,12 @@ static host.
 
 ```
 budget-tracker/
-├── index.html          Page shell: month screen (month bar, receipt
-│                        summary, target progress, breakdown,
-│                        transaction list) and dashboard screen
-│                        (insights, trend), plus add/edit sheet and
-│                        settings sheet. Screens are plain hidden-
-│                        attribute divs toggled in app.js — no router
+├── index.html          Page shell: Month/Dashboard/Settings screens
+│                        plus the bottom tab bar and the add/edit
+│                        transaction sheet (still a modal — the only
+│                        one left). Screens are plain hidden-attribute
+│                        divs toggled in app.js — no router. Icons are
+│                        inline SVG (no icon font/library)
 ├── styles.css           All styling. CSS custom properties in :root
 │                        define the theme; dark mode overrides the
 │                        same variables under [data-theme="dark"]
@@ -113,14 +124,22 @@ keep serving the old cached version indefinitely.
   in `app.js` (`categoryColor()`). Reordering or resizing that array
   changes chart colors — add new categories at the end and add a
   matching `--cat-N` pair (light + dark) if you go past 8.
+- If a class sets `display` on an element that's also toggled via the
+  `hidden` attribute (e.g. `.fab { display: flex; }`), add an explicit
+  `.that-class[hidden] { display: none; }` override. The class selector
+  and the browser's built-in `[hidden]` rule have equal specificity, so
+  without the override the later one (the author's) wins and `hidden`
+  silently stops hiding the element. Hit this twice already (the old
+  `.dashboard` wrapper, then `.fab`) — check for it whenever a new
+  `hidden`-toggled element gets its own `display` rule.
 
 ## Possible future enhancements
 
 (Not started — ideas only.)
 
 - Recurring transactions
-- Export/import data (JSON or CSV) since everything is local-only
-  and has no backup
+- Import data (JSON or CSV) — monthly CSV export exists, but there's
+  still no way to restore/back up all data or bring in past records
 - Multiple accounts/wallets
 - Charts beyond the simple category bars and dashboard trend
 - Per-category budgets/limits with progress indicators (the
