@@ -7,11 +7,18 @@ Apple Developer account, and no Mac required.
 ## What it is
 
 - Add income and expenses with a category, optional note, and date.
-- Monthly view with prev/next navigation, a receipt-styled balance
-  summary, a category breakdown (expenses only), and a day-grouped
-  transaction list.
-- Settings: theme (light / dark / system) and a currency symbol picker
-  (defaults to no symbol).
+- Two screens, swapped in place (no page navigation, no router):
+  - **Month screen** (default): prev/next month navigation, a
+    receipt-styled balance summary, monthly expense target progress,
+    a category breakdown (expenses only), and a day-grouped
+    transaction list.
+  - **Dashboard screen** (opened via the 📊 button in the top bar):
+    top category, average daily spend, and a spending-by-category
+    pie chart (with legend) for the last-viewed month, plus a
+    6-month expense trend. Tapping a trend month jumps back to the
+    month screen on that month, for drill-down.
+- Settings: theme (light / dark / system), a currency symbol picker
+  (defaults to no symbol), and an optional monthly expense target.
 - Fully offline-capable once installed — a service worker caches the
   app shell, and all data lives in the browser's `localStorage` on
   the user's own device. No backend, no accounts, no network calls.
@@ -27,9 +34,12 @@ static host.
 
 ```
 budget-tracker/
-├── index.html          Page shell: month bar, receipt summary,
-│                        breakdown, transaction list, add/edit sheet,
-│                        settings sheet
+├── index.html          Page shell: month screen (month bar, receipt
+│                        summary, target progress, breakdown,
+│                        transaction list) and dashboard screen
+│                        (insights, trend), plus add/edit sheet and
+│                        settings sheet. Screens are plain hidden-
+│                        attribute divs toggled in app.js — no router
 ├── styles.css           All styling. CSS custom properties in :root
 │                        define the theme; dark mode overrides the
 │                        same variables under [data-theme="dark"]
@@ -55,8 +65,12 @@ Stored client-side in `localStorage`, nothing leaves the device.
   ```
 - `ledger_settings_v1` — JSON object:
   ```js
-  { theme: "light" | "dark" | "system", currency: "none" | "USD" | "PHP" | ... }
+  { theme: "light" | "dark" | "system", currency: "none" | "USD" | "PHP" | ...,
+    monthlyTarget: number | null }
   ```
+  `monthlyTarget` is a single overall expense target applied to every
+  month (not per-category, not per-month); `null`/absent means no
+  target is set and the dashboard's target card stays hidden.
 
 Category lists and the currency list (order: none, USD, PHP, then the
 rest) are defined as constants near the top of `app.js`.
@@ -94,6 +108,11 @@ keep serving the old cached version indefinitely.
   mode stays consistent — avoid hardcoding colors.
 - Keep files separated by concern (markup / styles / logic) rather
   than inlining, so future fixes touch one small file.
+- Expense categories are colored via `--cat-1`...`--cat-8` in
+  `styles.css`, mapped by index into the `CATEGORIES.expense` array
+  in `app.js` (`categoryColor()`). Reordering or resizing that array
+  changes chart colors — add new categories at the end and add a
+  matching `--cat-N` pair (light + dark) if you go past 8.
 
 ## Possible future enhancements
 
@@ -103,5 +122,6 @@ keep serving the old cached version indefinitely.
 - Export/import data (JSON or CSV) since everything is local-only
   and has no backup
 - Multiple accounts/wallets
-- Charts beyond the simple category bars
-- Budgets/limits per category with progress indicators
+- Charts beyond the simple category bars and dashboard trend
+- Per-category budgets/limits with progress indicators (the
+  dashboard currently only supports one overall monthly target)

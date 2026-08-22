@@ -24,7 +24,7 @@
     { code: "KRW", symbol: "₩", label: "KRW — ₩" }
   ];
 
-  const DEFAULT_SETTINGS = { theme: "system", currency: "none" };
+  const DEFAULT_SETTINGS = { theme: "system", currency: "none", monthlyTarget: null };
 
   const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
@@ -84,9 +84,13 @@
     return c ? c.symbol : "";
   }
 
+  function formatNumber(n) {
+    return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
   function formatMoney(n) {
     const sign = n < 0 ? "-" : "";
-    return sign + currencySymbol() + Math.abs(n).toFixed(2);
+    return sign + currencySymbol() + formatNumber(Math.abs(n));
   }
 
   function todayISO() {
@@ -95,11 +99,19 @@
     return d.toISOString().slice(0, 10);
   }
 
-  function getMonthTransactions() {
+  function getTransactionsForMonth(year, month) {
     return transactions.filter(t => {
       const d = new Date(t.date + "T00:00:00");
-      return d.getFullYear() === viewYear && d.getMonth() === viewMonth;
+      return d.getFullYear() === year && d.getMonth() === month;
     });
+  }
+
+  function getMonthTransactions() {
+    return getTransactionsForMonth(viewYear, viewMonth);
+  }
+
+  function daysInMonth(year, month) {
+    return new Date(year, month + 1, 0).getDate();
   }
 
   function dateLabel(iso) {
@@ -126,6 +138,38 @@
     document.getElementById("expenseAmount").textContent = formatMoney(expense);
   }
 
+  function categoryTotals(expenses) {
+    const totals = {};
+    expenses.forEach(t => { totals[t.category] = (totals[t.category] || 0) + t.amount; });
+    return Object.entries(totals).sort((a, b) => b[1] - a[1]);
+  }
+
+  function categoryColor(category) {
+    const idx = CATEGORIES.expense.indexOf(category);
+    return `var(--cat-${(idx < 0 ? 0 : idx) + 1})`;
+  }
+
+  // Builds SVG pie slices for category rows (sorted [category, amount] pairs) as a fraction of `total`.
+  function buildPieSlices(rows, total) {
+    const cx = 50, cy = 50, r = 45;
+    if (rows.length === 1) {
+      return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${categoryColor(rows[0][0])}"></circle>`;
+    }
+    let angle = -90; // start at 12 o'clock
+    return rows.map(([cat, amt]) => {
+      const sweep = (amt / total) * 360;
+      const endAngle = angle + sweep;
+      const x1 = cx + r * Math.cos(angle * Math.PI / 180);
+      const y1 = cy + r * Math.sin(angle * Math.PI / 180);
+      const x2 = cx + r * Math.cos(endAngle * Math.PI / 180);
+      const y2 = cy + r * Math.sin(endAngle * Math.PI / 180);
+      const largeArc = sweep > 180 ? 1 : 0;
+      const path = `M${cx},${cy} L${x1.toFixed(3)},${y1.toFixed(3)} A${r},${r} 0 ${largeArc} 1 ${x2.toFixed(3)},${y2.toFixed(3)} Z`;
+      angle = endAngle;
+      return `<path d="${path}" fill="${categoryColor(cat)}"></path>`;
+    }).join("");
+  }
+
   function renderBreakdown(monthTx) {
     const section = document.getElementById("breakdown");
     const list = document.getElementById("breakdownList");
@@ -138,9 +182,7 @@
     }
     section.hidden = false;
 
-    const totals = {};
-    expenses.forEach(t => { totals[t.category] = (totals[t.category] || 0) + t.amount; });
-    const rows = Object.entries(totals).sort((a, b) => b[1] - a[1]);
+    const rows = categoryTotals(expenses);
     const max = rows[0][1];
 
     list.innerHTML = rows.map(([cat, amt]) => `
@@ -151,6 +193,163 @@
       </div>
     `).join("");
   }
+
+  function renderTargetCard(monthTx) {
+    const targetCard = document.getElementById("targetCard");
+    if (!settings.monthlyTarget) {
+      targetCard.hidden = true;
+      return;
+    }
+    targetCard.hidden = false;
+
+    const expense = monthTx.filter(t => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+    const isCurrentMonth = viewYear === today.getFullYear() && viewMonth === today.getMonth();
+    const totalDays = daysInMonth(viewYear, viewMonth);
+    const target = settings.monthlyTarget;
+    const pct = Math.round((expense / target) * 100);
+    const remaining = target - expense;
+    const fill = document.getElementById("targetBarFill");
+
+    document.getElementById("targetPercent").textContent = pct + "%";
+    fill.style.width = Math.min(100, Math.max(0, pct)) + "%";
+    fill.classList.toggle("warning", pct >= 80 && pct < 100);
+    fill.classList.toggle("over", pct >= 100);
+
+    const statusEl = document.getElementById("targetStatus");
+    if (remaining >= 0) {
+      if (isCurrentMonth) {
+        const daysLeft = Math.max(1, totalDays - today.getDate() + 1);
+        const dailySafe = remaining / daysLeft;
+        statusEl.textContent = `${formatMoney(remaining)} left · ${formatMoney(dailySafe)}/day for ${daysLeft} day${daysLeft === 1 ? "" : "s"}`;
+      } else {
+        statusEl.textContent = `${formatMoney(remaining)} under target`;
+      }
+    } else {
+      statusEl.textContent = `${formatMoney(Math.abs(remaining))} over target`;
+    }
+  }
+
+  function renderDashboardScreen() {
+    const monthTx = getMonthTransactions();
+    const isCurrentMonth = viewYear === today.getFullYear() && viewMonth === today.getMonth();
+    const totalDays = daysInMonth(viewYear, viewMonth);
+    const expense = monthTx.filter(t => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+
+    document.getElementById("dashboardEmpty").hidden = transactions.length > 0;
+
+    // Quick insights: top category + average daily spend, for the month last viewed
+    const insightRow = document.getElementById("insightRow");
+    const expenses = monthTx.filter(t => t.type === "expense");
+    const rows = categoryTotals(expenses);
+
+    if (expenses.length === 0) {
+      insightRow.innerHTML = "";
+    } else {
+      const topCategory = rows[0];
+      const elapsedDays = isCurrentMonth ? today.getDate() : totalDays;
+      const avgDaily = expense / elapsedDays;
+
+      insightRow.innerHTML = `
+        <div class="insight-chip">
+          <span class="insight-label">Top category (${escapeHtml(MONTH_NAMES[viewMonth].slice(0, 3))})</span>
+          <span class="insight-value">${escapeHtml(topCategory[0])} <span class="mono">${formatMoney(topCategory[1])}</span></span>
+        </div>
+        <div class="insight-chip">
+          <span class="insight-label">Avg / day</span>
+          <span class="insight-value mono">${formatMoney(avgDaily)}</span>
+        </div>
+      `;
+    }
+
+    // Spending-by-category pie chart, for the same month
+    const pieCard = document.getElementById("pieCard");
+    if (expenses.length === 0) {
+      pieCard.hidden = true;
+    } else {
+      pieCard.hidden = false;
+      document.getElementById("pieLabel").textContent = `Spending by category (${MONTH_NAMES[viewMonth].slice(0, 3)})`;
+      document.getElementById("pieSlices").innerHTML = buildPieSlices(rows, expense);
+      document.getElementById("pieLegend").innerHTML = rows.map(([cat, amt]) => `
+        <div class="pie-legend-row">
+          <span class="pie-swatch" style="background:${categoryColor(cat)}"></span>
+          <span class="pie-legend-name">${escapeHtml(cat)}</span>
+          <span class="pie-legend-pct mono">${Math.round((amt / expense) * 100)}%</span>
+          <span class="pie-legend-amt mono">${formatMoney(amt)}</span>
+        </div>
+      `).join("");
+    }
+
+    // 6-month trend, ending on the month last viewed — tap a bar to jump there
+    const trendCard = document.getElementById("trendCard");
+    const months = [];
+    for (let i = 5; i >= 0; i--) {
+      let m = viewMonth - i, y = viewYear;
+      while (m < 0) { m += 12; y--; }
+      const tx = getTransactionsForMonth(y, m);
+      const total = tx.filter(t => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+      months.push({ year: y, month: m, total });
+    }
+    const hasTrendData = months.some(m => m.total > 0);
+    if (!hasTrendData) {
+      trendCard.hidden = true;
+    } else {
+      trendCard.hidden = false;
+      const max = Math.max(...months.map(m => m.total), 1);
+      const trendBars = document.getElementById("trendBars");
+      trendBars.innerHTML = months.map(m => `
+        <button type="button" class="trend-bar-col" data-year="${m.year}" data-month="${m.month}" aria-label="${MONTH_NAMES[m.month]} ${m.year}, ${formatMoney(m.total)} spent">
+          <div class="trend-bar-track">
+            <div class="trend-bar-fill ${m.year === viewYear && m.month === viewMonth ? "current" : ""}" style="height:${Math.max(2, (m.total / max) * 100)}%"></div>
+          </div>
+          <span class="trend-bar-label">${MONTH_NAMES[m.month].slice(0, 3)}</span>
+        </button>
+      `).join("");
+      trendBars.querySelectorAll(".trend-bar-col").forEach(btn => {
+        btn.addEventListener("click", () => {
+          viewYear = parseInt(btn.dataset.year, 10);
+          viewMonth = parseInt(btn.dataset.month, 10);
+          renderAll();
+          showMonthScreen();
+        });
+      });
+    }
+  }
+
+  // ---------- Screen switching ----------
+  let currentScreen = "month";
+  const monthScreen = document.getElementById("monthScreen");
+  const dashboardScreen = document.getElementById("dashboardScreen");
+  const dashboardBtn = document.getElementById("dashboardBtn");
+  const goToTodayBtn = document.getElementById("goToTodayBtn");
+  const addBtn = document.getElementById("addBtn");
+
+  function showMonthScreen() {
+    currentScreen = "month";
+    monthScreen.hidden = false;
+    dashboardScreen.hidden = true;
+    addBtn.hidden = false;
+    dashboardBtn.hidden = false;
+    goToTodayBtn.hidden = true;
+  }
+
+  function showDashboardScreen() {
+    currentScreen = "dashboard";
+    monthScreen.hidden = true;
+    dashboardScreen.hidden = false;
+    addBtn.hidden = true;
+    dashboardBtn.hidden = true;
+    goToTodayBtn.hidden = false;
+    renderDashboardScreen();
+  }
+
+  dashboardBtn.addEventListener("click", showDashboardScreen);
+  document.getElementById("backToMonth").addEventListener("click", showMonthScreen);
+  goToTodayBtn.addEventListener("click", () => {
+    viewYear = today.getFullYear();
+    viewMonth = today.getMonth();
+    renderAll();
+    showMonthScreen();
+  });
 
   function renderList(monthTx) {
     const listEl = document.getElementById("txList");
@@ -179,7 +378,7 @@
             <span class="tx-category">${escapeHtml(t.category)}</span>
             ${t.note ? `<span class="tx-note">${escapeHtml(t.note)}</span>` : ""}
           </span>
-          <span class="tx-amount ${t.type} mono">${t.type === "expense" ? "-" : "+"}${currencySymbol()}${t.amount.toFixed(2)}</span>
+          <span class="tx-amount ${t.type} mono">${t.type === "expense" ? "-" : "+"}${currencySymbol()}${formatNumber(t.amount)}</span>
         </button>
       `).join("")}
     `).join("");
@@ -199,8 +398,10 @@
     renderMonthLabel();
     const monthTx = getMonthTransactions();
     renderSummary(monthTx);
+    renderTargetCard(monthTx);
     renderBreakdown(monthTx);
     renderList(monthTx);
+    if (currentScreen === "dashboard") renderDashboardScreen();
   }
 
   // ---------- Sheet (add/edit form) ----------
@@ -254,7 +455,7 @@
     backdrop.classList.remove("open");
   }
 
-  document.getElementById("addBtn").addEventListener("click", () => openSheet("add"));
+  addBtn.addEventListener("click", () => openSheet("add"));
   document.getElementById("cancelBtn").addEventListener("click", closeSheet);
   backdrop.addEventListener("click", (e) => { if (e.target === backdrop) closeSheet(); });
 
@@ -339,6 +540,7 @@
   // ---------- Settings sheet ----------
   const settingsBackdrop = document.getElementById("settingsBackdrop");
   const currencySelect = document.getElementById("currencySelect");
+  const targetInput = document.getElementById("targetInput");
 
   function populateCurrencyOptions() {
     currencySelect.innerHTML = CURRENCIES.map(c => `<option value="${c.code}">${c.label}</option>`).join("");
@@ -355,6 +557,7 @@
   document.getElementById("settingsBtn").addEventListener("click", () => {
     document.querySelectorAll("#themeToggle .type-btn").forEach(b => b.classList.toggle("active", b.dataset.theme === settings.theme));
     currencySelect.value = settings.currency;
+    targetInput.value = settings.monthlyTarget != null ? settings.monthlyTarget : "";
     settingsBackdrop.classList.add("open");
   });
   document.getElementById("closeSettingsBtn").addEventListener("click", () => settingsBackdrop.classList.remove("open"));
@@ -367,6 +570,13 @@
 
   currencySelect.addEventListener("change", () => {
     settings.currency = currencySelect.value;
+    saveSettings();
+    renderAll();
+  });
+
+  targetInput.addEventListener("change", () => {
+    const val = parseFloat(targetInput.value);
+    settings.monthlyTarget = (targetInput.value.trim() === "" || isNaN(val) || val <= 0) ? null : val;
     saveSettings();
     renderAll();
   });
