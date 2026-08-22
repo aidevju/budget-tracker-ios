@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<title>Ledger — Budget Tracker</title>
+
+<!-- PWA / iOS home screen setup -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#20262c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Ledger">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png">
+
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="app">
+
+  <!-- Month switcher -->
+  <header class="month-bar">
+    <button class="icon-btn" id="prevMonth" aria-label="Previous month">‹</button>
+    <h1 id="monthLabel">August 2026</h1>
+    <button class="icon-btn" id="nextMonth" aria-label="Next month">›</button>
+  </header>
+
+  <!-- Receipt-style balance summary (signature element) -->
+  <section class="receipt" id="receipt">
+    <div class="receipt-row receipt-total">
+      <span>Balance</span>
+      <span id="balanceAmount" class="mono">$0.00</span>
+    </div>
+    <div class="receipt-dashes"></div>
+    <div class="receipt-row">
+      <span>Income</span>
+      <span id="incomeAmount" class="mono income-text">$0.00</span>
+    </div>
+    <div class="receipt-row">
+      <span>Expenses</span>
+      <span id="expenseAmount" class="mono expense-text">$0.00</span>
+    </div>
+  </section>
+
+  <!-- Category breakdown -->
+  <section class="breakdown" id="breakdown" hidden>
+    <h2>By category</h2>
+    <div id="breakdownList" class="breakdown-list"></div>
+  </section>
+
+  <!-- Transactions list -->
+  <section class="transactions">
+    <h2>Transactions</h2>
+    <div id="txList" class="tx-list">
+      <p class="empty-state" id="emptyState">No transactions yet this month. Tap + to add your first one.</p>
+    </div>
+  </section>
+
+</div>
+
+<!-- Floating add button -->
+<button class="fab" id="addBtn" aria-label="Add transaction">+</button>
+
+<!-- Add / edit transaction sheet -->
+<div class="sheet-backdrop" id="sheetBackdrop">
+  <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+    <div class="sheet-handle"></div>
+    <h2 id="sheetTitle">Add transaction</h2>
+
+    <div class="type-toggle" id="typeToggle">
+      <button type="button" class="type-btn active" data-type="expense">Expense</button>
+      <button type="button" class="type-btn" data-type="income">Income</button>
+    </div>
+
+    <form id="txForm">
+      <label class="field">
+        <span>Amount</span>
+        <input type="number" id="amountInput" inputmode="decimal" step="0.01" min="0" placeholder="0.00" required>
+      </label>
+
+      <label class="field">
+        <span>Category</span>
+        <select id="categoryInput" required></select>
+      </label>
+
+      <label class="field">
+        <span>Note (optional)</span>
+        <input type="text" id="noteInput" placeholder="What was it for?" maxlength="60">
+      </label>
+
+      <label class="field">
+        <span>Date</span>
+        <input type="date" id="dateInput" required>
+      </label>
+
+      <p class="form-error" id="formError" hidden></p>
+
+      <div class="sheet-actions">
+        <button type="button" class="btn-text" id="deleteBtn" hidden>Delete</button>
+        <div class="sheet-actions-right">
+          <button type="button" class="btn-secondary" id="cancelBtn">Cancel</button>
+          <button type="submit" class="btn-primary" id="saveBtn">Save</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
