@@ -2,16 +2,35 @@
   "use strict";
 
   const STORAGE_KEY = "ledger_transactions_v1";
+  const SETTINGS_KEY = "ledger_settings_v1";
 
   const CATEGORIES = {
     expense: ["Food", "Transport", "Housing", "Utilities", "Shopping", "Health", "Entertainment", "Other"],
     income: ["Salary", "Freelance", "Gift", "Other"]
   };
 
+  // "none" (no symbol) is the default. Dollars first, then PHP, then the rest.
+  const CURRENCIES = [
+    { code: "none", symbol: "", label: "No symbol" },
+    { code: "USD", symbol: "$", label: "USD — $" },
+    { code: "PHP", symbol: "₱", label: "PHP — ₱" },
+    { code: "EUR", symbol: "€", label: "EUR — €" },
+    { code: "GBP", symbol: "£", label: "GBP — £" },
+    { code: "JPY", symbol: "¥", label: "JPY — ¥" },
+    { code: "INR", symbol: "₹", label: "INR — ₹" },
+    { code: "AUD", symbol: "A$", label: "AUD — A$" },
+    { code: "CAD", symbol: "C$", label: "CAD — C$" },
+    { code: "CNY", symbol: "¥", label: "CNY — ¥" },
+    { code: "KRW", symbol: "₩", label: "KRW — ₩" }
+  ];
+
+  const DEFAULT_SETTINGS = { theme: "system", currency: "none" };
+
   const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
   // ---------- State ----------
   let transactions = loadTransactions();
+  let settings = loadSettings();
   const today = new Date();
   let viewYear = today.getFullYear();
   let viewMonth = today.getMonth(); // 0-indexed
@@ -37,14 +56,37 @@
     }
   }
 
+  function loadSettings() {
+    try {
+      const raw = localStorage.getItem(SETTINGS_KEY);
+      return raw ? { ...DEFAULT_SETTINGS, ...JSON.parse(raw) } : { ...DEFAULT_SETTINGS };
+    } catch (e) {
+      console.error("Failed to load settings", e);
+      return { ...DEFAULT_SETTINGS };
+    }
+  }
+
+  function saveSettings() {
+    try {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    } catch (e) {
+      console.error("Failed to save settings", e);
+    }
+  }
+
   function uid() {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   }
 
   // ---------- Helpers ----------
+  function currencySymbol() {
+    const c = CURRENCIES.find(c => c.code === settings.currency);
+    return c ? c.symbol : "";
+  }
+
   function formatMoney(n) {
     const sign = n < 0 ? "-" : "";
-    return sign + "$" + Math.abs(n).toFixed(2);
+    return sign + currencySymbol() + Math.abs(n).toFixed(2);
   }
 
   function todayISO() {
@@ -137,7 +179,7 @@
             <span class="tx-category">${escapeHtml(t.category)}</span>
             ${t.note ? `<span class="tx-note">${escapeHtml(t.note)}</span>` : ""}
           </span>
-          <span class="tx-amount ${t.type} mono">${t.type === "expense" ? "-" : "+"}${formatMoney(t.amount).replace("$","").replace("-","")}</span>
+          <span class="tx-amount ${t.type} mono">${t.type === "expense" ? "-" : "+"}${currencySymbol()}${t.amount.toFixed(2)}</span>
         </button>
       `).join("")}
     `).join("");
@@ -270,6 +312,67 @@
     closeSheet();
     renderAll();
   });
+
+  // ---------- Theme ----------
+  function resolvedIsDark(theme) {
+    if (theme === "dark") return true;
+    if (theme === "light") return false;
+    return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  }
+
+  function applyTheme(theme) {
+    if (theme === "system") {
+      document.documentElement.removeAttribute("data-theme");
+    } else {
+      document.documentElement.setAttribute("data-theme", theme);
+    }
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", resolvedIsDark(theme) ? "#1b1c1e" : "#20262c");
+  }
+
+  if (window.matchMedia) {
+    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+      if (settings.theme === "system") applyTheme("system");
+    });
+  }
+
+  // ---------- Settings sheet ----------
+  const settingsBackdrop = document.getElementById("settingsBackdrop");
+  const currencySelect = document.getElementById("currencySelect");
+
+  function populateCurrencyOptions() {
+    currencySelect.innerHTML = CURRENCIES.map(c => `<option value="${c.code}">${c.label}</option>`).join("");
+    currencySelect.value = settings.currency;
+  }
+
+  function setThemeChoice(theme) {
+    settings.theme = theme;
+    document.querySelectorAll("#themeToggle .type-btn").forEach(b => b.classList.toggle("active", b.dataset.theme === theme));
+    applyTheme(theme);
+    saveSettings();
+  }
+
+  document.getElementById("settingsBtn").addEventListener("click", () => {
+    document.querySelectorAll("#themeToggle .type-btn").forEach(b => b.classList.toggle("active", b.dataset.theme === settings.theme));
+    currencySelect.value = settings.currency;
+    settingsBackdrop.classList.add("open");
+  });
+  document.getElementById("closeSettingsBtn").addEventListener("click", () => settingsBackdrop.classList.remove("open"));
+  settingsBackdrop.addEventListener("click", (e) => { if (e.target === settingsBackdrop) settingsBackdrop.classList.remove("open"); });
+
+  document.getElementById("themeToggle").addEventListener("click", (e) => {
+    const btn = e.target.closest(".type-btn");
+    if (btn) setThemeChoice(btn.dataset.theme);
+  });
+
+  currencySelect.addEventListener("change", () => {
+    settings.currency = currencySelect.value;
+    saveSettings();
+    renderAll();
+  });
+
+  populateCurrencyOptions();
+  applyTheme(settings.theme);
 
   // ---------- Month navigation ----------
   document.getElementById("prevMonth").addEventListener("click", () => {

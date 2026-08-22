@@ -20,6 +20,12 @@
 
 <div class="app">
 
+  <!-- App bar -->
+  <header class="top-bar">
+    <span class="app-title">Ledger</span>
+    <button class="icon-btn" id="settingsBtn" aria-label="Settings">⚙</button>
+  </header>
+
   <!-- Month switcher -->
   <header class="month-bar">
     <button class="icon-btn" id="prevMonth" aria-label="Previous month">‹</button>
@@ -105,6 +111,34 @@
         </div>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- Settings sheet -->
+<div class="sheet-backdrop" id="settingsBackdrop">
+  <div class="sheet" id="settingsSheet" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <div class="sheet-handle"></div>
+    <h2 id="settingsTitle">Settings</h2>
+
+    <div class="settings-group">
+      <span class="settings-label">Theme</span>
+      <div class="type-toggle" id="themeToggle">
+        <button type="button" class="type-btn" data-theme="light">Light</button>
+        <button type="button" class="type-btn" data-theme="dark">Dark</button>
+        <button type="button" class="type-btn" data-theme="system">System</button>
+      </div>
+    </div>
+
+    <label class="field">
+      <span>Currency</span>
+      <select id="currencySelect"></select>
+    </label>
+
+    <div class="sheet-actions">
+      <div class="sheet-actions-right">
+        <button type="button" class="btn-primary" id="closeSettingsBtn">Done</button>
+      </div>
+    </div>
   </div>
 </div>
 
