@@ -15,6 +15,36 @@
   --font-mono: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
 }
 
+/* Dark theme overrides. Applied explicitly via [data-theme="dark"],
+   or automatically when theme is "system" and the OS prefers dark
+   (that case has no data-theme attribute at all — see app.js). */
+:root[data-theme="dark"] {
+  --ink: #ECE8DE;
+  --ink-soft: #A6A296;
+  --paper: #1B1C1E;
+  --paper-raised: #262729;
+  --line: #38393b;
+  --line-strong: #4c4d4f;
+  --income: #83C08F;
+  --income-soft: #24312a;
+  --expense: #E2917C;
+  --expense-soft: #362621;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --ink: #ECE8DE;
+    --ink-soft: #A6A296;
+    --paper: #1B1C1E;
+    --paper-raised: #262729;
+    --line: #38393b;
+    --line-strong: #4c4d4f;
+    --income: #83C08F;
+    --income-soft: #24312a;
+    --expense: #E2917C;
+    --expense-soft: #362621;
+  }
+}
+
 * { box-sizing: border-box; }
 
 html, body {
@@ -40,6 +70,21 @@ body {
 h1, h2 { margin: 0; font-weight: 600; }
 
 .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* Top app bar */
+.top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.app-title {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-soft);
+}
 
 /* Month bar */
 .month-bar {
@@ -242,6 +287,14 @@ h1, h2 { margin: 0; font-weight: 600; }
   cursor: pointer;
 }
 .type-btn.active { background: var(--paper-raised); color: var(--ink); box-shadow: 0 1px 3px rgba(32,38,44,0.12); }
+
+.settings-group { margin-bottom: 16px; }
+.settings-label {
+  display: block;
+  font-size: 12px;
+  color: var(--ink-soft);
+  margin-bottom: 5px;
+}
 
 .field {
   display: block;
