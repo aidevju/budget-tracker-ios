@@ -20,24 +20,18 @@
 
 <div class="app">
 
-  <!-- App bar -->
-  <header class="top-bar">
-    <span class="app-title">Ledger</span>
-    <div class="top-bar-actions">
-      <button class="icon-btn" id="dashboardBtn" aria-label="Dashboard">📊</button>
-      <button class="icon-btn" id="goToTodayBtn" aria-label="Go to current month" hidden>📅</button>
-      <button class="icon-btn" id="settingsBtn" aria-label="Settings">⚙</button>
-    </div>
-  </header>
-
   <!-- Month screen: month-specific summary and transactions -->
   <div id="monthScreen">
 
     <!-- Month switcher -->
     <header class="month-bar">
-      <button class="icon-btn" id="prevMonth" aria-label="Previous month">‹</button>
+      <button class="icon-btn" id="prevMonth" aria-label="Previous month">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="22" height="22"><path d="M15 6l-6 6 6 6"/></svg>
+      </button>
       <h1 id="monthLabel">August 2026</h1>
-      <button class="icon-btn" id="nextMonth" aria-label="Next month">›</button>
+      <button class="icon-btn" id="nextMonth" aria-label="Next month">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="22" height="22"><path d="M9 6l6 6-6 6"/></svg>
+      </button>
     </header>
 
     <!-- Receipt-style balance summary (signature element) -->
@@ -77,7 +71,10 @@
 
     <!-- Transactions list -->
     <section class="transactions">
-      <h2>Transactions</h2>
+      <div class="list-header-row">
+        <h2>Transactions</h2>
+        <button type="button" class="link-btn" id="exportBtn">Export CSV</button>
+      </div>
       <div id="txList" class="tx-list">
         <p class="empty-state" id="emptyState">No transactions yet this month. Tap + to add your first one.</p>
       </div>
@@ -87,10 +84,7 @@
 
   <!-- Dashboard screen: top category, average spend, spending trend -->
   <div id="dashboardScreen" hidden>
-    <header class="dashboard-bar">
-      <button class="icon-btn" id="backToMonth" aria-label="Back to month">‹</button>
-      <h1>Dashboard</h1>
-    </header>
+    <h1 class="screen-title">Dashboard</h1>
 
     <div class="insight-row" id="insightRow"></div>
 
@@ -107,7 +101,7 @@
     <div class="trend-card" id="trendCard" hidden>
       <div class="trend-label-row">
         <span class="trend-label">Last 6 months</span>
-        <span class="trend-hint">Tap a month to jump to it</span>
+        <button type="button" class="link-btn" id="goToTodayBtn">Today</button>
       </div>
       <div class="trend-bars" id="trendBars"></div>
     </div>
@@ -115,10 +109,53 @@
     <p class="empty-state" id="dashboardEmpty" hidden>Add some transactions to see insights here.</p>
   </div>
 
+  <!-- Settings screen -->
+  <div id="settingsScreen" hidden>
+    <h1 class="screen-title">Settings</h1>
+
+    <div class="settings-group">
+      <span class="settings-label">Theme</span>
+      <div class="type-toggle" id="themeToggle">
+        <button type="button" class="type-btn" data-theme="light">Light</button>
+        <button type="button" class="type-btn" data-theme="dark">Dark</button>
+        <button type="button" class="type-btn" data-theme="system">System</button>
+      </div>
+    </div>
+
+    <label class="field">
+      <span>Currency</span>
+      <select id="currencySelect"></select>
+    </label>
+
+    <label class="field">
+      <span>Monthly expense target (optional)</span>
+      <input type="number" id="targetInput" inputmode="decimal" step="0.01" min="0" placeholder="No target set">
+    </label>
+  </div>
+
 </div>
 
-<!-- Floating add button -->
-<button class="fab" id="addBtn" aria-label="Add transaction">+</button>
+<!-- Bottom chrome: floating add button + tab bar -->
+<div class="bottom-chrome">
+  <button class="fab" id="addBtn" aria-label="Add transaction">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+  </button>
+
+  <nav class="tabbar">
+    <button type="button" class="tab active" data-screen="month" aria-label="Month">
+      <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10.5 12 4l8 6.5"/><path d="M6 9.5V19a1 1 0 0 0 1 1h3v-5h4v5h3a1 1 0 0 0 1-1V9.5"/></svg></span>
+      <span class="lb">Month</span>
+    </button>
+    <button type="button" class="tab" data-screen="dashboard" aria-label="Dashboard">
+      <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 19V11"/><path d="M12 19V5"/><path d="M19 19v-6"/></svg></span>
+      <span class="lb">Dashboard</span>
+    </button>
+    <button type="button" class="tab" data-screen="settings" aria-label="Settings">
+      <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="7" x2="20" y2="7"/><circle cx="9" cy="7" r="2.1" fill="currentColor" stroke="none"/><line x1="4" y1="12" x2="20" y2="12"/><circle cx="16" cy="12" r="2.1" fill="currentColor" stroke="none"/><line x1="4" y1="17" x2="20" y2="17"/><circle cx="11" cy="17" r="2.1" fill="currentColor" stroke="none"/></svg></span>
+      <span class="lb">Settings</span>
+    </button>
+  </nav>
+</div>
 
 <!-- Add / edit transaction sheet -->
 <div class="sheet-backdrop" id="sheetBackdrop">
@@ -162,39 +199,6 @@
         </div>
       </div>
     </form>
-  </div>
-</div>
-
-<!-- Settings sheet -->
-<div class="sheet-backdrop" id="settingsBackdrop">
-  <div class="sheet" id="settingsSheet" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
-    <div class="sheet-handle"></div>
-    <h2 id="settingsTitle">Settings</h2>
-
-    <div class="settings-group">
-      <span class="settings-label">Theme</span>
-      <div class="type-toggle" id="themeToggle">
-        <button type="button" class="type-btn" data-theme="light">Light</button>
-        <button type="button" class="type-btn" data-theme="dark">Dark</button>
-        <button type="button" class="type-btn" data-theme="system">System</button>
-      </div>
-    </div>
-
-    <label class="field">
-      <span>Currency</span>
-      <select id="currencySelect"></select>
-    </label>
-
-    <label class="field">
-      <span>Monthly expense target (optional)</span>
-      <input type="number" id="targetInput" inputmode="decimal" step="0.01" min="0" placeholder="No target set">
-    </label>
-
-    <div class="sheet-actions">
-      <div class="sheet-actions-right">
-        <button type="button" class="btn-primary" id="closeSettingsBtn">Done</button>
-      </div>
-    </div>
   </div>
 </div>
 

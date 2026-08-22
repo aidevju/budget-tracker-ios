@@ -144,6 +144,59 @@
     return Object.entries(totals).sort((a, b) => b[1] - a[1]);
   }
 
+  function csvField(value) {
+    const str = String(value);
+    return /[",\r\n]/.test(str) ? '"' + str.replace(/"/g, '""') + '"' : str;
+  }
+
+  function csvRow(fields) {
+    return fields.map(csvField).join(",");
+  }
+
+  function exportMonthCSV() {
+    const monthTx = getMonthTransactions();
+    const income = monthTx.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0);
+    const expense = monthTx.filter(t => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+    const catRows = categoryTotals(monthTx.filter(t => t.type === "expense"));
+
+    const lines = [
+      csvRow([`Ledger — ${MONTH_NAMES[viewMonth]} ${viewYear}`]),
+      "",
+      csvRow(["Summary"]),
+      csvRow(["Income", income.toFixed(2)]),
+      csvRow(["Expenses", expense.toFixed(2)]),
+      csvRow(["Balance", (income - expense).toFixed(2)]),
+      ""
+    ];
+
+    if (catRows.length > 0) {
+      lines.push(csvRow(["By category"]));
+      catRows.forEach(([cat, amt]) => lines.push(csvRow([cat, amt.toFixed(2)])));
+      lines.push("");
+    }
+
+    lines.push(csvRow(["Transactions"]));
+    lines.push(csvRow(["Date", "Type", "Category", "Note", "Amount"]));
+    [...monthTx]
+      .sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id))
+      .forEach(t => {
+        lines.push(csvRow([t.date, t.type === "income" ? "Income" : "Expense", t.category, t.note || "", t.amount.toFixed(2)]));
+      });
+
+    // Leading BOM so Excel reads the UTF-8 currency symbols correctly.
+    const blob = new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const filename = `ledger_${viewYear}-${String(viewMonth + 1).padStart(2, "0")}.csv`;
+
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   function categoryColor(category) {
     const idx = CATEGORIES.expense.indexOf(category);
     return `var(--cat-${(idx < 0 ? 0 : idx) + 1})`;
@@ -309,7 +362,7 @@
           viewYear = parseInt(btn.dataset.year, 10);
           viewMonth = parseInt(btn.dataset.month, 10);
           renderAll();
-          showMonthScreen();
+          showScreen("month");
         });
       });
     }
@@ -317,39 +370,34 @@
 
   // ---------- Screen switching ----------
   let currentScreen = "month";
-  const monthScreen = document.getElementById("monthScreen");
-  const dashboardScreen = document.getElementById("dashboardScreen");
-  const dashboardBtn = document.getElementById("dashboardBtn");
+  const SCREENS = {
+    month: document.getElementById("monthScreen"),
+    dashboard: document.getElementById("dashboardScreen"),
+    settings: document.getElementById("settingsScreen")
+  };
   const goToTodayBtn = document.getElementById("goToTodayBtn");
+  const exportBtn = document.getElementById("exportBtn");
   const addBtn = document.getElementById("addBtn");
 
-  function showMonthScreen() {
-    currentScreen = "month";
-    monthScreen.hidden = false;
-    dashboardScreen.hidden = true;
-    addBtn.hidden = false;
-    dashboardBtn.hidden = false;
-    goToTodayBtn.hidden = true;
+  function showScreen(name) {
+    currentScreen = name;
+    Object.entries(SCREENS).forEach(([key, el]) => { el.hidden = key !== name; });
+    addBtn.hidden = name !== "month";
+    document.querySelectorAll(".tab").forEach(tab => tab.classList.toggle("active", tab.dataset.screen === name));
+    if (name === "dashboard") renderDashboardScreen();
+    if (name === "settings") syncSettingsUI();
   }
 
-  function showDashboardScreen() {
-    currentScreen = "dashboard";
-    monthScreen.hidden = true;
-    dashboardScreen.hidden = false;
-    addBtn.hidden = true;
-    dashboardBtn.hidden = true;
-    goToTodayBtn.hidden = false;
-    renderDashboardScreen();
-  }
-
-  dashboardBtn.addEventListener("click", showDashboardScreen);
-  document.getElementById("backToMonth").addEventListener("click", showMonthScreen);
+  document.querySelectorAll(".tab").forEach(tab => {
+    tab.addEventListener("click", () => showScreen(tab.dataset.screen));
+  });
   goToTodayBtn.addEventListener("click", () => {
     viewYear = today.getFullYear();
     viewMonth = today.getMonth();
     renderAll();
-    showMonthScreen();
+    showScreen("month");
   });
+  exportBtn.addEventListener("click", exportMonthCSV);
 
   function renderList(monthTx) {
     const listEl = document.getElementById("txList");
@@ -537,8 +585,7 @@
     });
   }
 
-  // ---------- Settings sheet ----------
-  const settingsBackdrop = document.getElementById("settingsBackdrop");
+  // ---------- Settings screen ----------
   const currencySelect = document.getElementById("currencySelect");
   const targetInput = document.getElementById("targetInput");
 
@@ -554,14 +601,11 @@
     saveSettings();
   }
 
-  document.getElementById("settingsBtn").addEventListener("click", () => {
+  function syncSettingsUI() {
     document.querySelectorAll("#themeToggle .type-btn").forEach(b => b.classList.toggle("active", b.dataset.theme === settings.theme));
     currencySelect.value = settings.currency;
     targetInput.value = settings.monthlyTarget != null ? settings.monthlyTarget : "";
-    settingsBackdrop.classList.add("open");
-  });
-  document.getElementById("closeSettingsBtn").addEventListener("click", () => settingsBackdrop.classList.remove("open"));
-  settingsBackdrop.addEventListener("click", (e) => { if (e.target === settingsBackdrop) settingsBackdrop.classList.remove("open"); });
+  }
 
   document.getElementById("themeToggle").addEventListener("click", (e) => {
     const btn = e.target.closest(".type-btn");
