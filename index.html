@@ -23,46 +23,97 @@
   <!-- App bar -->
   <header class="top-bar">
     <span class="app-title">Ledger</span>
-    <button class="icon-btn" id="settingsBtn" aria-label="Settings">⚙</button>
+    <div class="top-bar-actions">
+      <button class="icon-btn" id="dashboardBtn" aria-label="Dashboard">📊</button>
+      <button class="icon-btn" id="goToTodayBtn" aria-label="Go to current month" hidden>📅</button>
+      <button class="icon-btn" id="settingsBtn" aria-label="Settings">⚙</button>
+    </div>
   </header>
 
-  <!-- Month switcher -->
-  <header class="month-bar">
-    <button class="icon-btn" id="prevMonth" aria-label="Previous month">‹</button>
-    <h1 id="monthLabel">August 2026</h1>
-    <button class="icon-btn" id="nextMonth" aria-label="Next month">›</button>
-  </header>
+  <!-- Month screen: month-specific summary and transactions -->
+  <div id="monthScreen">
 
-  <!-- Receipt-style balance summary (signature element) -->
-  <section class="receipt" id="receipt">
-    <div class="receipt-row receipt-total">
-      <span>Balance</span>
-      <span id="balanceAmount" class="mono">$0.00</span>
-    </div>
-    <div class="receipt-dashes"></div>
-    <div class="receipt-row">
-      <span>Income</span>
-      <span id="incomeAmount" class="mono income-text">$0.00</span>
-    </div>
-    <div class="receipt-row">
-      <span>Expenses</span>
-      <span id="expenseAmount" class="mono expense-text">$0.00</span>
-    </div>
-  </section>
+    <!-- Month switcher -->
+    <header class="month-bar">
+      <button class="icon-btn" id="prevMonth" aria-label="Previous month">‹</button>
+      <h1 id="monthLabel">August 2026</h1>
+      <button class="icon-btn" id="nextMonth" aria-label="Next month">›</button>
+    </header>
 
-  <!-- Category breakdown -->
-  <section class="breakdown" id="breakdown" hidden>
-    <h2>By category</h2>
-    <div id="breakdownList" class="breakdown-list"></div>
-  </section>
+    <!-- Receipt-style balance summary (signature element) -->
+    <section class="receipt" id="receipt">
+      <div class="receipt-row receipt-total">
+        <span>Balance</span>
+        <span id="balanceAmount" class="mono">$0.00</span>
+      </div>
+      <div class="receipt-dashes"></div>
+      <div class="receipt-row">
+        <span>Income</span>
+        <span id="incomeAmount" class="mono income-text">$0.00</span>
+      </div>
+      <div class="receipt-row">
+        <span>Expenses</span>
+        <span id="expenseAmount" class="mono expense-text">$0.00</span>
+      </div>
+    </section>
 
-  <!-- Transactions list -->
-  <section class="transactions">
-    <h2>Transactions</h2>
-    <div id="txList" class="tx-list">
-      <p class="empty-state" id="emptyState">No transactions yet this month. Tap + to add your first one.</p>
+    <!-- Monthly expense target progress -->
+    <div class="target-card" id="targetCard" hidden>
+      <div class="target-header">
+        <span class="target-label">Monthly target</span>
+        <span class="target-percent mono" id="targetPercent">0%</span>
+      </div>
+      <div class="target-bar-track">
+        <div class="target-bar-fill" id="targetBarFill"></div>
+      </div>
+      <div class="target-status" id="targetStatus"></div>
     </div>
-  </section>
+
+    <!-- Category breakdown -->
+    <section class="breakdown" id="breakdown" hidden>
+      <h2>By category</h2>
+      <div id="breakdownList" class="breakdown-list"></div>
+    </section>
+
+    <!-- Transactions list -->
+    <section class="transactions">
+      <h2>Transactions</h2>
+      <div id="txList" class="tx-list">
+        <p class="empty-state" id="emptyState">No transactions yet this month. Tap + to add your first one.</p>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- Dashboard screen: top category, average spend, spending trend -->
+  <div id="dashboardScreen" hidden>
+    <header class="dashboard-bar">
+      <button class="icon-btn" id="backToMonth" aria-label="Back to month">‹</button>
+      <h1>Dashboard</h1>
+    </header>
+
+    <div class="insight-row" id="insightRow"></div>
+
+    <div class="pie-card" id="pieCard" hidden>
+      <span class="pie-label" id="pieLabel">Spending by category</span>
+      <div class="pie-body">
+        <svg class="pie-svg" viewBox="0 0 100 100" aria-hidden="true">
+          <g id="pieSlices"></g>
+        </svg>
+        <div class="pie-legend" id="pieLegend"></div>
+      </div>
+    </div>
+
+    <div class="trend-card" id="trendCard" hidden>
+      <div class="trend-label-row">
+        <span class="trend-label">Last 6 months</span>
+        <span class="trend-hint">Tap a month to jump to it</span>
+      </div>
+      <div class="trend-bars" id="trendBars"></div>
+    </div>
+
+    <p class="empty-state" id="dashboardEmpty" hidden>Add some transactions to see insights here.</p>
+  </div>
 
 </div>
 
@@ -132,6 +183,11 @@
     <label class="field">
       <span>Currency</span>
       <select id="currencySelect"></select>
+    </label>
+
+    <label class="field">
+      <span>Monthly expense target (optional)</span>
+      <input type="number" id="targetInput" inputmode="decimal" step="0.01" min="0" placeholder="No target set">
     </label>
 
     <div class="sheet-actions">

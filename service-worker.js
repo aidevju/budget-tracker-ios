@@ -1,7 +1,7 @@
 // Bump this version string any time you change any cached file.
 // That forces every visitor's phone to fetch fresh copies instead of
 // silently serving the old cached version.
-const CACHE_NAME = "ledger-cache-v2";
+const CACHE_NAME = "ledger-cache-v9";
 
 const APP_SHELL = [
   "./",
