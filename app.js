@@ -3,10 +3,23 @@
 
   const STORAGE_KEY = "ledger_transactions_v1";
   const SETTINGS_KEY = "ledger_settings_v1";
+  const LISTS_KEY = "ledger_lists_v1";
+  const TEMPLATES_KEY = "ledger_templates_v1";
 
-  const CATEGORIES = {
-    expense: ["Food", "Transport", "Housing", "Utilities", "Shopping", "Health", "Entertainment", "Other"],
-    income: ["Salary", "Freelance", "Gift", "Other"]
+  // Default category/payment-method lists, seeded into ledger_lists_v1 the
+  // first time the app runs (or the first time it runs after this feature
+  // shipped) so existing users see identical dropdowns/colors as before.
+  // "Bills" and the payment-methods list are new as of this feature.
+  const DEFAULT_LISTS = {
+    expenseCategories: ["Food", "Transport", "Housing", "Utilities", "Shopping", "Health", "Entertainment", "Other", "Bills"],
+    incomeCategories: ["Salary", "Freelance", "Gift", "Other"],
+    paymentMethods: ["Cash", "Debit Card", "Credit Card", "Transfer", "GCash", "Other"],
+    // Expense category -> fixed chart-color slot, assigned once at creation
+    // and never reassigned by renaming/reordering. Slots 0-8 map to the
+    // curated --cat-1..9 CSS variables; slot 9+ (only reachable once a user
+    // adds a 10th expense category) falls back to a generated color.
+    expenseCategoryColorSlots: { Food: 0, Transport: 1, Housing: 2, Utilities: 3, Shopping: 4, Health: 5, Entertainment: 6, Other: 7, Bills: 8 },
+    nextExpenseColorSlot: 9
   };
 
   // "none" (no symbol) is the default. Dollars first, then PHP, then the rest.
@@ -24,18 +37,25 @@
     { code: "KRW", symbol: "₩", label: "KRW — ₩" }
   ];
 
-  const DEFAULT_SETTINGS = { theme: "system", currency: "none", monthlyTarget: null };
+  const DEFAULT_SETTINGS = { theme: "system", currency: "none", monthlyTarget: null, ccSuggestWindowDays: 60 };
 
   const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
   // ---------- State ----------
   let transactions = loadTransactions();
   let settings = loadSettings();
+  let lists = loadLists();
+  let templates = loadTemplates();
   const today = new Date();
   let viewYear = today.getFullYear();
   let viewMonth = today.getMonth(); // 0-indexed
   let editingId = null; // null = adding new
   let currentType = "expense";
+  let currentBillAccount = null; // account key ("" = Unspecified card) the Pay Card Bill sheet is open for
+  let billShowOlder = false;
+  let billCheckedIds = new Set(); // ids of candidate charges currently checked in the Pay Card Bill sheet
+  let editingTemplateId = null; // null = adding new
+  let templateType = "expense"; // independent from currentType — the template sheet has its own type toggle
 
   // ---------- Storage ----------
   function loadTransactions() {
@@ -74,8 +94,119 @@
     }
   }
 
+  function loadLists() {
+    try {
+      const raw = localStorage.getItem(LISTS_KEY);
+      if (raw) return { ...DEFAULT_LISTS, ...JSON.parse(raw) };
+    } catch (e) {
+      console.error("Failed to load lists", e);
+    }
+    const seeded = JSON.parse(JSON.stringify(DEFAULT_LISTS));
+    try {
+      localStorage.setItem(LISTS_KEY, JSON.stringify(seeded));
+    } catch (e) {
+      console.error("Failed to save lists", e);
+    }
+    return seeded;
+  }
+
+  function saveLists() {
+    try {
+      localStorage.setItem(LISTS_KEY, JSON.stringify(lists));
+    } catch (e) {
+      console.error("Failed to save lists", e);
+    }
+  }
+
+  function loadTemplates() {
+    try {
+      const raw = localStorage.getItem(TEMPLATES_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch (e) {
+      console.error("Failed to load templates", e);
+      return [];
+    }
+  }
+
+  function saveTemplates() {
+    try {
+      localStorage.setItem(TEMPLATES_KEY, JSON.stringify(templates));
+    } catch (e) {
+      console.error("Failed to save templates", e);
+    }
+  }
+
   function uid() {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  }
+
+  // ---------- List management (Settings) ----------
+  function listFieldAndType(listKey) {
+    if (listKey === "paymentMethods") return { field: "paymentMethod", type: null };
+    if (listKey === "incomeCategories") return { field: "category", type: "income" };
+    return { field: "category", type: "expense" };
+  }
+
+  function listUsageCounts(listKey, value) {
+    const { field, type } = listFieldAndType(listKey);
+    const matches = (t) => t[field] === value && (type === null || t.type === type);
+    return { transactions: transactions.filter(matches).length, templates: templates.filter(matches).length };
+  }
+
+  function addListValue(listKey, rawValue) {
+    const value = rawValue.trim();
+    if (!value) return;
+    const arr = lists[listKey];
+    if (arr.includes(value)) return;
+    arr.push(value);
+    if (listKey === "expenseCategories") {
+      lists.expenseCategoryColorSlots[value] = lists.nextExpenseColorSlot++;
+    }
+    saveLists();
+  }
+
+  function renameListValue(listKey, oldValue, rawNewValue) {
+    const newValue = rawNewValue.trim();
+    if (!newValue || newValue === oldValue) return;
+    const arr = lists[listKey];
+    const idx = arr.indexOf(oldValue);
+    if (idx === -1 || arr.includes(newValue)) return;
+    arr[idx] = newValue;
+
+    if (listKey === "expenseCategories" && lists.expenseCategoryColorSlots[oldValue] !== undefined) {
+      lists.expenseCategoryColorSlots[newValue] = lists.expenseCategoryColorSlots[oldValue];
+      delete lists.expenseCategoryColorSlots[oldValue];
+    }
+
+    const { field, type } = listFieldAndType(listKey);
+    transactions.forEach(t => {
+      if (t[field] === oldValue && (type === null || t.type === type)) t[field] = newValue;
+    });
+    templates.forEach(t => {
+      if (t[field] === oldValue && (type === null || t.type === type)) t[field] = newValue;
+    });
+
+    saveTransactions();
+    saveTemplates();
+    saveLists();
+  }
+
+  // Returns an error message if the value is in use (delete refused), or null on success.
+  function deleteListValue(listKey, value) {
+    const usage = listUsageCounts(listKey, value);
+    if (usage.transactions > 0 || usage.templates > 0) {
+      const parts = [];
+      if (usage.transactions > 0) parts.push(`${usage.transactions} transaction${usage.transactions === 1 ? "" : "s"}`);
+      if (usage.templates > 0) parts.push(`${usage.templates} template${usage.templates === 1 ? "" : "s"}`);
+      return `Can't delete — used by ${parts.join(" and ")}.`;
+    }
+    const arr = lists[listKey];
+    const idx = arr.indexOf(value);
+    if (idx === -1) return null;
+    arr.splice(idx, 1);
+    if (listKey === "expenseCategories") delete lists.expenseCategoryColorSlots[value];
+    saveLists();
+    return null;
   }
 
   // ---------- Helpers ----------
@@ -95,6 +226,15 @@
 
   function todayISO() {
     const d = new Date();
+    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+    return d.toISOString().slice(0, 10);
+  }
+
+  // Shifts an ISO date string by `days` (may be negative), staying in local
+  // calendar-day terms the same way todayISO() does.
+  function shiftDateISO(iso, days) {
+    const d = new Date(iso + "T00:00:00");
+    d.setDate(d.getDate() + days);
     d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
     return d.toISOString().slice(0, 10);
   }
@@ -125,6 +265,51 @@
     return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
   }
 
+  function escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  // ---------- Autosuggest (subcategory / account) ----------
+  // Native <datalist> has poor/inconsistent support in iOS Safari (this
+  // app's actual install target), so subcategory/account suggestions are a
+  // small custom dropdown instead. Suggestions are computed live from
+  // `transactions` each time they're shown — no cache to keep in sync.
+  function distinctFieldValues(field) {
+    const set = new Set();
+    transactions.forEach(t => { if (t[field]) set.add(t[field]); });
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }
+
+  function setupAutosuggest(inputEl, listEl, field) {
+    function showSuggestions() {
+      const query = inputEl.value.trim().toLowerCase();
+      const values = distinctFieldValues(field);
+      const matches = (query ? values.filter(v => v.toLowerCase().includes(query)) : values).slice(0, 8);
+      if (matches.length === 0) {
+        listEl.hidden = true;
+        listEl.innerHTML = "";
+        return;
+      }
+      listEl.innerHTML = matches.map(v => `<div class="autosuggest-item">${escapeHtml(v)}</div>`).join("");
+      listEl.hidden = false;
+    }
+    inputEl.addEventListener("focus", showSuggestions);
+    inputEl.addEventListener("input", showSuggestions);
+    inputEl.addEventListener("blur", () => {
+      // Delay so a tap on a suggestion (see mousedown below) still registers.
+      setTimeout(() => { listEl.hidden = true; }, 150);
+    });
+    listEl.addEventListener("mousedown", (e) => e.preventDefault()); // don't blur the input before the click lands
+    listEl.addEventListener("click", (e) => {
+      const item = e.target.closest(".autosuggest-item");
+      if (!item) return;
+      inputEl.value = item.textContent;
+      listEl.hidden = true;
+    });
+  }
+
   // ---------- Rendering ----------
   function renderMonthLabel() {
     document.getElementById("monthLabel").textContent = `${MONTH_NAMES[viewMonth]} ${viewYear}`;
@@ -153,6 +338,12 @@
     return fields.map(csvField).join(",");
   }
 
+  function reconciledWithLabel(t) {
+    if (!t.reconciledBillId) return "";
+    const bill = transactions.find(b => b.id === t.reconciledBillId);
+    return bill ? `${bill.date} — ${bill.note}` : "";
+  }
+
   function exportMonthCSV() {
     const monthTx = getMonthTransactions();
     const income = monthTx.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0);
@@ -176,15 +367,25 @@
     }
 
     lines.push(csvRow(["Transactions"]));
-    lines.push(csvRow(["Date", "Type", "Category", "Note", "Amount"]));
+    lines.push(csvRow(["Date", "Type", "Category", "Subcategory", "Payment Method", "Account", "Note", "Reconciled With", "Amount"]));
     [...monthTx]
       .sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id))
       .forEach(t => {
-        lines.push(csvRow([t.date, t.type === "income" ? "Income" : "Expense", t.category, t.note || "", t.amount.toFixed(2)]));
+        lines.push(csvRow([
+          t.date,
+          t.type === "income" ? "Income" : "Expense",
+          t.category,
+          t.subcategory || "",
+          t.paymentMethod || "Cash",
+          t.account || "",
+          t.note || "",
+          reconciledWithLabel(t),
+          t.amount.toFixed(2)
+        ]));
       });
 
     // Leading BOM so Excel reads the UTF-8 currency symbols correctly.
-    const blob = new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
+    const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const filename = `ledger_${viewYear}-${String(viewMonth + 1).padStart(2, "0")}.csv`;
 
@@ -197,9 +398,22 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
+  // Expense category -> chart color. Slots 0-8 use the curated --cat-1..9
+  // CSS variables; anything beyond (only reachable once a user adds a 10th
+  // expense category via Settings) falls back to a generated color, since
+  // the fixed CSS palette can't scale to an arbitrary user-extended list.
   function categoryColor(category) {
-    const idx = CATEGORIES.expense.indexOf(category);
-    return `var(--cat-${(idx < 0 ? 0 : idx) + 1})`;
+    let slot = lists.expenseCategoryColorSlots[category];
+    if (slot === undefined) slot = 0;
+    if (slot < 9) return `var(--cat-${slot + 1})`;
+    return generatedCategoryColor(slot);
+  }
+
+  function generatedCategoryColor(slot) {
+    const hue = (slot * 47) % 360;
+    const dark = resolvedIsDark(settings.theme);
+    const light = dark ? 68 : 45;
+    return `hsl(${hue}, 45%, ${light}%)`;
   }
 
   // Builds SVG pie slices for category rows (sorted [category, amount] pairs) as a fraction of `total`.
@@ -280,6 +494,52 @@
     } else {
       statusEl.textContent = `${formatMoney(Math.abs(remaining))} over target`;
     }
+  }
+
+  // ---------- Credit-card bill reconciliation ----------
+  function unbilledTotalsByAccount() {
+    const totals = {};
+    transactions.forEach(t => {
+      if (t.type === "expense" && t.paymentMethod === "Credit Card" && !t.reconciledBillId) {
+        const key = t.account || "";
+        totals[key] = (totals[key] || 0) + t.amount;
+      }
+    });
+    return Object.entries(totals)
+      .filter(([, amt]) => amt > 0.005)
+      .sort((a, b) => b[1] - a[1]);
+  }
+
+  function getCandidateCharges(account, billDate, includeOlder) {
+    const windowStart = includeOlder ? null : shiftDateISO(billDate, -settings.ccSuggestWindowDays);
+    return transactions.filter(t =>
+      t.type === "expense" &&
+      t.paymentMethod === "Credit Card" &&
+      (t.account || "") === account &&
+      !t.reconciledBillId &&
+      t.date <= billDate &&
+      (windowStart === null || t.date >= windowStart)
+    ).sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  function renderCreditCardsPanel() {
+    const card = document.getElementById("ccCard");
+    const rows = unbilledTotalsByAccount();
+    if (rows.length === 0) {
+      card.hidden = true;
+      return;
+    }
+    card.hidden = false;
+    document.getElementById("ccList").innerHTML = rows.map(([account, total]) => `
+      <div class="cc-row">
+        <span class="cc-account">${escapeHtml(account || "Unspecified card")}</span>
+        <span class="cc-balance mono">${formatMoney(total)}</span>
+        <button type="button" class="link-btn cc-pay-btn" data-account="${escapeHtml(account)}">Pay Bill</button>
+      </div>
+    `).join("");
+    document.querySelectorAll(".cc-pay-btn").forEach(btn => {
+      btn.addEventListener("click", () => openBillSheet(btn.dataset.account));
+    });
   }
 
   function renderDashboardScreen() {
@@ -366,6 +626,8 @@
         });
       });
     }
+
+    renderCreditCardsPanel();
   }
 
   // ---------- Screen switching ----------
@@ -373,6 +635,7 @@
   const SCREENS = {
     month: document.getElementById("monthScreen"),
     dashboard: document.getElementById("dashboardScreen"),
+    templates: document.getElementById("templatesScreen"),
     settings: document.getElementById("settingsScreen")
   };
   const goToTodayBtn = document.getElementById("goToTodayBtn");
@@ -385,6 +648,7 @@
     addBtn.hidden = name !== "month";
     document.querySelectorAll(".tab").forEach(tab => tab.classList.toggle("active", tab.dataset.screen === name));
     if (name === "dashboard") renderDashboardScreen();
+    if (name === "templates") renderTemplatesScreen();
     if (name === "settings") syncSettingsUI();
   }
 
@@ -436,12 +700,6 @@
     });
   }
 
-  function escapeHtml(str) {
-    const div = document.createElement("div");
-    div.textContent = str;
-    return div.innerHTML;
-  }
-
   function renderAll() {
     renderMonthLabel();
     const monthTx = getMonthTransactions();
@@ -452,29 +710,107 @@
     if (currentScreen === "dashboard") renderDashboardScreen();
   }
 
+  // ---------- Templates screen ----------
+  // Templates are dateless, flat, and unlinked to transactions created from
+  // them (applying one is a one-time copy) — see PROJECT.md's data model.
+  function templateLabel(t) {
+    let label = t.subcategory ? `${t.category} · ${t.subcategory}` : t.category;
+    if (t.note) label += ` — ${t.note}`;
+    return label;
+  }
+
+  function renderTemplateRow(t) {
+    const metaParts = [];
+    if (t.note) metaParts.push(t.note);
+    if (t.paymentMethod) metaParts.push(t.paymentMethod);
+    if (t.account) metaParts.push(t.account);
+    const amountClass = t.amount != null ? `tx-amount ${t.type} mono` : "tx-amount mono";
+    const amountText = t.amount != null
+      ? (t.type === "expense" ? "-" : "+") + currencySymbol() + formatNumber(t.amount)
+      : "—";
+    return `
+      <button class="tx-row" data-id="${t.id}">
+        <span class="tx-dot ${t.type}"></span>
+        <span class="tx-main">
+          <span class="tx-category">${escapeHtml(t.category)}${t.subcategory ? " · " + escapeHtml(t.subcategory) : ""}</span>
+          ${metaParts.length ? `<span class="tx-note">${escapeHtml(metaParts.join(" · "))}</span>` : ""}
+        </span>
+        <span class="${amountClass}">${amountText}</span>
+      </button>
+    `;
+  }
+
+  function renderTemplatesScreen() {
+    const listEl = document.getElementById("templateList");
+    if (templates.length === 0) {
+      listEl.innerHTML = `<p class="empty-state">No templates yet. Tap + Add to create one from a recurring income or expense.</p>`;
+      return;
+    }
+    listEl.innerHTML = templates.map(renderTemplateRow).join("");
+    listEl.querySelectorAll(".tx-row").forEach(row => {
+      row.addEventListener("click", () => openTemplateSheet("edit", row.dataset.id));
+    });
+  }
+
   // ---------- Sheet (add/edit form) ----------
   const backdrop = document.getElementById("sheetBackdrop");
   const form = document.getElementById("txForm");
+  const templatePickerField = document.getElementById("templatePickerField");
+  const templatePickerInput = document.getElementById("templatePickerInput");
   const amountInput = document.getElementById("amountInput");
   const categoryInput = document.getElementById("categoryInput");
+  const subcategoryInput = document.getElementById("subcategoryInput");
+  const paymentMethodInput = document.getElementById("paymentMethodInput");
+  const accountInput = document.getElementById("accountInput");
   const noteInput = document.getElementById("noteInput");
   const dateInput = document.getElementById("dateInput");
   const formError = document.getElementById("formError");
   const deleteBtn = document.getElementById("deleteBtn");
   const sheetTitle = document.getElementById("sheetTitle");
+  const linkedChargesSection = document.getElementById("linkedChargesSection");
+  const linkedChargesToggle = document.getElementById("linkedChargesToggle");
+  const linkedChargesList = document.getElementById("linkedChargesList");
+
+  setupAutosuggest(subcategoryInput, document.getElementById("subcategorySuggestions"), "subcategory");
+  setupAutosuggest(accountInput, document.getElementById("accountSuggestions"), "account");
 
   function populateCategories() {
-    categoryInput.innerHTML = CATEGORIES[currentType].map(c => `<option value="${c}">${c}</option>`).join("");
+    const list = currentType === "expense" ? lists.expenseCategories : lists.incomeCategories;
+    categoryInput.innerHTML = list.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
+  }
+
+  function populatePaymentMethodOptions(selectEl) {
+    selectEl.innerHTML = lists.paymentMethods.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
+  }
+
+  function populateTemplatePicker() {
+    const matching = templates.filter(t => t.type === currentType);
+    templatePickerInput.innerHTML = `<option value="">Use a template (optional)</option>` +
+      matching.map(t => `<option value="${t.id}">${escapeHtml(templateLabel(t))}</option>`).join("");
   }
 
   function setType(type) {
     currentType = type;
-    document.querySelectorAll(".type-btn").forEach(b => b.classList.toggle("active", b.dataset.type === type));
+    document.querySelectorAll("#typeToggle .type-btn").forEach(b => b.classList.toggle("active", b.dataset.type === type));
     populateCategories();
+    populateTemplatePicker();
+  }
+
+  function renderChargeRows(charges) {
+    return [...charges].sort((a, b) => a.date.localeCompare(b.date)).map(t => `
+      <div class="linked-charge-row">
+        <span class="bill-candidate-main">
+          <span class="bill-candidate-date">${t.date}</span>
+          <span class="bill-candidate-note">${escapeHtml(t.category)}${t.note ? " · " + escapeHtml(t.note) : ""}</span>
+        </span>
+        <span class="bill-candidate-amount mono">${formatMoney(t.amount)}</span>
+      </div>
+    `).join("");
   }
 
   function openSheet(mode, id) {
     formError.hidden = true;
+    templatePickerField.hidden = mode !== "add";
     if (mode === "edit") {
       const tx = transactions.find(t => t.id === id);
       if (!tx) return;
@@ -483,17 +819,35 @@
       setType(tx.type);
       amountInput.value = tx.amount;
       categoryInput.value = tx.category;
+      subcategoryInput.value = tx.subcategory || "";
+      paymentMethodInput.value = tx.paymentMethod || "Cash";
+      accountInput.value = tx.account || "";
       noteInput.value = tx.note || "";
       dateInput.value = tx.date;
       deleteBtn.hidden = false;
+
+      const linked = transactions.filter(t => t.reconciledBillId === id);
+      if (linked.length > 0) {
+        linkedChargesSection.hidden = false;
+        linkedChargesToggle.textContent = `Includes ${linked.length} charge${linked.length === 1 ? "" : "s"} — View`;
+        linkedChargesList.hidden = true;
+        linkedChargesList.innerHTML = renderChargeRows(linked);
+      } else {
+        linkedChargesSection.hidden = true;
+      }
     } else {
       editingId = null;
       sheetTitle.textContent = "Add transaction";
       setType("expense");
+      templatePickerInput.value = "";
       amountInput.value = "";
+      subcategoryInput.value = "";
+      paymentMethodInput.value = "Cash";
+      accountInput.value = "";
       noteInput.value = "";
       dateInput.value = todayISO();
       deleteBtn.hidden = true;
+      linkedChargesSection.hidden = true;
     }
     backdrop.classList.add("open");
     setTimeout(() => amountInput.focus(), 200);
@@ -507,15 +861,37 @@
   document.getElementById("cancelBtn").addEventListener("click", closeSheet);
   backdrop.addEventListener("click", (e) => { if (e.target === backdrop) closeSheet(); });
 
+  linkedChargesToggle.addEventListener("click", () => {
+    linkedChargesList.hidden = !linkedChargesList.hidden;
+  });
+
   document.getElementById("typeToggle").addEventListener("click", (e) => {
     const btn = e.target.closest(".type-btn");
     if (btn) setType(btn.dataset.type);
+  });
+
+  templatePickerInput.addEventListener("change", () => {
+    const id = templatePickerInput.value;
+    if (!id) return;
+    const t = templates.find(tpl => tpl.id === id);
+    if (t) {
+      categoryInput.value = t.category;
+      subcategoryInput.value = t.subcategory || "";
+      paymentMethodInput.value = t.paymentMethod || "Cash";
+      accountInput.value = t.account || "";
+      noteInput.value = t.note || "";
+      if (t.amount != null) amountInput.value = t.amount;
+    }
+    templatePickerInput.value = ""; // one-time apply — not a sticky/bound selection
   });
 
   form.addEventListener("submit", (e) => {
     e.preventDefault();
     const amount = parseFloat(amountInput.value);
     const category = categoryInput.value;
+    const subcategory = subcategoryInput.value.trim();
+    const paymentMethod = paymentMethodInput.value;
+    const account = accountInput.value.trim();
     const date = dateInput.value;
 
     if (!amount || amount <= 0) {
@@ -533,15 +909,18 @@
 
     if (editingId) {
       const tx = transactions.find(t => t.id === editingId);
-      Object.assign(tx, { type: currentType, amount, category, note: noteInput.value.trim(), date });
+      Object.assign(tx, { type: currentType, amount, category, subcategory, note: noteInput.value.trim(), date, paymentMethod, account });
     } else {
       transactions.push({
         id: uid(),
         type: currentType,
         amount,
         category,
+        subcategory,
         note: noteInput.value.trim(),
-        date
+        date,
+        paymentMethod,
+        account
       });
     }
     saveTransactions();
@@ -556,10 +935,270 @@
 
   deleteBtn.addEventListener("click", () => {
     if (!editingId) return;
+    // Unlink any charges this transaction had settled, rather than leaving
+    // dangling reconciledBillId references — they become unbilled again.
+    transactions.forEach(t => { if (t.reconciledBillId === editingId) delete t.reconciledBillId; });
     transactions = transactions.filter(t => t.id !== editingId);
     saveTransactions();
     closeSheet();
     renderAll();
+  });
+
+  // ---------- Pay Card Bill sheet ----------
+  const billBackdrop = document.getElementById("billSheetBackdrop");
+  const billForm = document.getElementById("billForm");
+  const billSheetTitle = document.getElementById("billSheetTitle");
+  const billDateInput = document.getElementById("billDateInput");
+  const billAmountInput = document.getElementById("billAmountInput");
+  const billPaymentMethodInput = document.getElementById("billPaymentMethodInput");
+  const billPaidAccountInput = document.getElementById("billPaidAccountInput");
+  const billCandidatesList = document.getElementById("billCandidatesList");
+  const billCandidatesEmpty = document.getElementById("billCandidatesEmpty");
+  const billSelectedCount = document.getElementById("billSelectedCount");
+  const billRunningSum = document.getElementById("billRunningSum");
+  const billVariance = document.getElementById("billVariance");
+  const billShowOlderToggle = document.getElementById("billShowOlderToggle");
+  const billFormError = document.getElementById("billFormError");
+  const billCancelBtn = document.getElementById("billCancelBtn");
+
+  setupAutosuggest(billPaidAccountInput, document.getElementById("billPaidAccountSuggestions"), "account");
+
+  function ensureBillsCategoryExists() {
+    if (!lists.expenseCategories.includes("Bills")) {
+      lists.expenseCategories.push("Bills");
+      if (lists.expenseCategoryColorSlots["Bills"] === undefined) {
+        lists.expenseCategoryColorSlots["Bills"] = lists.nextExpenseColorSlot++;
+      }
+      saveLists();
+      if (currentType === "expense") populateCategories();
+    }
+  }
+
+  function openBillSheet(account) {
+    currentBillAccount = account;
+    billShowOlder = false;
+    billShowOlderToggle.textContent = "Show older charges";
+    billFormError.hidden = true;
+    billDateInput.value = todayISO();
+    billAmountInput.value = "";
+    billPaymentMethodInput.value = "Transfer";
+    billPaidAccountInput.value = "";
+    billSheetTitle.textContent = account ? `Pay Bill — ${account}` : "Pay Bill — Unspecified card";
+    billCheckedIds = new Set(getCandidateCharges(account, billDateInput.value, false).map(t => t.id));
+    renderBillCandidates();
+    billBackdrop.classList.add("open");
+  }
+
+  function closeBillSheet() {
+    billBackdrop.classList.remove("open");
+  }
+
+  function renderBillCandidates() {
+    const candidates = getCandidateCharges(currentBillAccount, billDateInput.value || todayISO(), billShowOlder);
+    billCandidatesEmpty.hidden = candidates.length > 0;
+    billCandidatesList.innerHTML = candidates.map(t => `
+      <label class="bill-candidate-row">
+        <input type="checkbox" class="bill-candidate-checkbox" data-id="${t.id}" ${billCheckedIds.has(t.id) ? "checked" : ""}>
+        <span class="bill-candidate-main">
+          <span class="bill-candidate-date">${t.date}</span>
+          <span class="bill-candidate-note">${escapeHtml(t.category)}${t.note ? " · " + escapeHtml(t.note) : ""}</span>
+        </span>
+        <span class="bill-candidate-amount mono">${formatMoney(t.amount)}</span>
+      </label>
+    `).join("");
+    billCandidatesList.querySelectorAll(".bill-candidate-checkbox").forEach(cb => {
+      cb.addEventListener("change", () => {
+        if (cb.checked) billCheckedIds.add(cb.dataset.id);
+        else billCheckedIds.delete(cb.dataset.id);
+        updateBillSummary();
+      });
+    });
+    updateBillSummary();
+  }
+
+  function updateBillSummary() {
+    const sum = transactions.filter(t => billCheckedIds.has(t.id)).reduce((s, t) => s + t.amount, 0);
+    billSelectedCount.textContent = billCheckedIds.size;
+    billRunningSum.textContent = formatMoney(sum);
+    const stated = parseFloat(billAmountInput.value);
+    billVariance.classList.remove("over", "short");
+    if (isNaN(stated)) {
+      billVariance.textContent = "—";
+    } else {
+      const variance = stated - sum;
+      billVariance.textContent = formatMoney(variance);
+      if (variance < -0.005) billVariance.classList.add("over");
+      else if (variance > 0.005) billVariance.classList.add("short");
+    }
+  }
+
+  billDateInput.addEventListener("change", () => {
+    billShowOlder = false;
+    billShowOlderToggle.textContent = "Show older charges";
+    billCheckedIds = new Set(getCandidateCharges(currentBillAccount, billDateInput.value, false).map(t => t.id));
+    renderBillCandidates();
+  });
+
+  billAmountInput.addEventListener("input", updateBillSummary);
+
+  billShowOlderToggle.addEventListener("click", () => {
+    billShowOlder = !billShowOlder;
+    billShowOlderToggle.textContent = billShowOlder ? "Hide older charges" : "Show older charges";
+    renderBillCandidates();
+  });
+
+  billCancelBtn.addEventListener("click", closeBillSheet);
+  billBackdrop.addEventListener("click", (e) => { if (e.target === billBackdrop) closeBillSheet(); });
+
+  billForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const amount = parseFloat(billAmountInput.value);
+    const date = billDateInput.value;
+
+    if (!amount || amount <= 0) {
+      billFormError.textContent = "Enter an amount greater than 0.";
+      billFormError.hidden = false;
+      billAmountInput.focus();
+      return;
+    }
+    if (!date) {
+      billFormError.textContent = "Choose a date.";
+      billFormError.hidden = false;
+      billDateInput.focus();
+      return;
+    }
+
+    ensureBillsCategoryExists();
+
+    const accountLabel = currentBillAccount || "Unspecified card";
+    const newTx = {
+      id: uid(),
+      type: "expense",
+      amount,
+      category: "Bills",
+      subcategory: "Credit Card",
+      note: `${accountLabel} Credit Card Bill`,
+      date,
+      paymentMethod: billPaymentMethodInput.value,
+      account: billPaidAccountInput.value.trim()
+    };
+    transactions.push(newTx);
+    transactions.forEach(t => { if (billCheckedIds.has(t.id)) t.reconciledBillId = newTx.id; });
+    saveTransactions();
+    closeBillSheet();
+    renderAll();
+  });
+
+  // ---------- Template sheet ----------
+  const templateBackdrop = document.getElementById("templateSheetBackdrop");
+  const templateForm = document.getElementById("templateForm");
+  const templateSheetTitle = document.getElementById("templateSheetTitle");
+  const templateCategoryInput = document.getElementById("templateCategoryInput");
+  const templateSubcategoryInput = document.getElementById("templateSubcategoryInput");
+  const templatePaymentMethodInput = document.getElementById("templatePaymentMethodInput");
+  const templateAccountInput = document.getElementById("templateAccountInput");
+  const templateNoteInput = document.getElementById("templateNoteInput");
+  const templateAmountInput = document.getElementById("templateAmountInput");
+  const templateFormError = document.getElementById("templateFormError");
+  const templateDeleteBtn = document.getElementById("templateDeleteBtn");
+  const templateCancelBtn = document.getElementById("templateCancelBtn");
+  const addTemplateBtn = document.getElementById("addTemplateBtn");
+
+  setupAutosuggest(templateSubcategoryInput, document.getElementById("templateSubcategorySuggestions"), "subcategory");
+  setupAutosuggest(templateAccountInput, document.getElementById("templateAccountSuggestions"), "account");
+
+  function populateTemplateCategories() {
+    const list = templateType === "expense" ? lists.expenseCategories : lists.incomeCategories;
+    templateCategoryInput.innerHTML = list.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
+  }
+
+  function setTemplateType(type) {
+    templateType = type;
+    document.querySelectorAll("#templateTypeToggle .type-btn").forEach(b => b.classList.toggle("active", b.dataset.type === type));
+    populateTemplateCategories();
+  }
+
+  function openTemplateSheet(mode, id) {
+    templateFormError.hidden = true;
+    if (mode === "edit") {
+      const t = templates.find(tpl => tpl.id === id);
+      if (!t) return;
+      editingTemplateId = id;
+      templateSheetTitle.textContent = "Edit template";
+      setTemplateType(t.type);
+      templateCategoryInput.value = t.category;
+      templateSubcategoryInput.value = t.subcategory || "";
+      templatePaymentMethodInput.value = t.paymentMethod || "Cash";
+      templateAccountInput.value = t.account || "";
+      templateNoteInput.value = t.note || "";
+      templateAmountInput.value = t.amount != null ? t.amount : "";
+      templateDeleteBtn.hidden = false;
+    } else {
+      editingTemplateId = null;
+      templateSheetTitle.textContent = "Add template";
+      setTemplateType("expense");
+      templateSubcategoryInput.value = "";
+      templatePaymentMethodInput.value = "Cash";
+      templateAccountInput.value = "";
+      templateNoteInput.value = "";
+      templateAmountInput.value = "";
+      templateDeleteBtn.hidden = true;
+    }
+    templateBackdrop.classList.add("open");
+  }
+
+  function closeTemplateSheet() {
+    templateBackdrop.classList.remove("open");
+  }
+
+  addTemplateBtn.addEventListener("click", () => openTemplateSheet("add"));
+  templateCancelBtn.addEventListener("click", closeTemplateSheet);
+  templateBackdrop.addEventListener("click", (e) => { if (e.target === templateBackdrop) closeTemplateSheet(); });
+
+  document.getElementById("templateTypeToggle").addEventListener("click", (e) => {
+    const btn = e.target.closest(".type-btn");
+    if (btn) setTemplateType(btn.dataset.type);
+  });
+
+  templateForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const category = templateCategoryInput.value;
+    const subcategory = templateSubcategoryInput.value.trim();
+    const paymentMethod = templatePaymentMethodInput.value;
+    const account = templateAccountInput.value.trim();
+    const note = templateNoteInput.value.trim();
+    const amountRaw = templateAmountInput.value.trim();
+    let amount = null;
+    if (amountRaw !== "") {
+      const parsed = parseFloat(amountRaw);
+      if (isNaN(parsed) || parsed <= 0) {
+        templateFormError.textContent = "Amount must be greater than 0, or left blank.";
+        templateFormError.hidden = false;
+        templateAmountInput.focus();
+        return;
+      }
+      amount = parsed;
+    }
+
+    if (editingTemplateId) {
+      const t = templates.find(tpl => tpl.id === editingTemplateId);
+      Object.assign(t, { type: templateType, category, subcategory, paymentMethod, account, note, amount });
+    } else {
+      templates.push({ id: uid(), type: templateType, category, subcategory, paymentMethod, account, note, amount });
+    }
+    saveTemplates();
+    closeTemplateSheet();
+    renderTemplatesScreen();
+    populateTemplatePicker();
+  });
+
+  templateDeleteBtn.addEventListener("click", () => {
+    if (!editingTemplateId) return;
+    templates = templates.filter(t => t.id !== editingTemplateId);
+    saveTemplates();
+    closeTemplateSheet();
+    renderTemplatesScreen();
+    populateTemplatePicker();
   });
 
   // ---------- Theme ----------
@@ -588,6 +1227,7 @@
   // ---------- Settings screen ----------
   const currencySelect = document.getElementById("currencySelect");
   const targetInput = document.getElementById("targetInput");
+  const ccWindowInput = document.getElementById("ccWindowInput");
 
   function populateCurrencyOptions() {
     currencySelect.innerHTML = CURRENCIES.map(c => `<option value="${c.code}">${c.label}</option>`).join("");
@@ -605,6 +1245,8 @@
     document.querySelectorAll("#themeToggle .type-btn").forEach(b => b.classList.toggle("active", b.dataset.theme === settings.theme));
     currencySelect.value = settings.currency;
     targetInput.value = settings.monthlyTarget != null ? settings.monthlyTarget : "";
+    ccWindowInput.value = settings.ccSuggestWindowDays;
+    renderAllListEditors();
   }
 
   document.getElementById("themeToggle").addEventListener("click", (e) => {
@@ -625,6 +1267,112 @@
     renderAll();
   });
 
+  ccWindowInput.addEventListener("change", () => {
+    const val = parseInt(ccWindowInput.value, 10);
+    settings.ccSuggestWindowDays = (!val || val <= 0) ? DEFAULT_SETTINGS.ccSuggestWindowDays : val;
+    ccWindowInput.value = settings.ccSuggestWindowDays;
+    saveSettings();
+  });
+
+  // ---------- Settings: list management (categories / payment methods) ----------
+  function renderListEditor(containerEl, listKey) {
+    const values = lists[listKey];
+    containerEl.innerHTML = values.map(v => `
+      <div class="list-editor-row" data-value="${escapeHtml(v)}">
+        <span class="list-editor-value">${escapeHtml(v)}</span>
+        <button type="button" class="link-btn list-editor-edit">Rename</button>
+        <button type="button" class="link-btn list-editor-delete">Delete</button>
+      </div>
+    `).join("") + `
+      <div class="list-editor-add">
+        <input type="text" class="list-editor-add-input" placeholder="Add new…" maxlength="60">
+        <button type="button" class="btn-secondary list-editor-add-btn">Add</button>
+      </div>
+    `;
+
+    containerEl.querySelectorAll(".list-editor-row").forEach(row => {
+      const value = row.dataset.value;
+
+      row.querySelector(".list-editor-edit").addEventListener("click", () => {
+        if (row.classList.contains("editing")) return;
+        row.classList.add("editing");
+        const valueSpan = row.querySelector(".list-editor-value");
+        const input = document.createElement("input");
+        input.type = "text";
+        input.className = "list-editor-rename-input";
+        input.value = value;
+        input.maxLength = 60;
+        valueSpan.replaceWith(input);
+        input.focus();
+        input.select();
+        let committed = false;
+        const commit = () => {
+          if (committed) return;
+          committed = true;
+          const newValue = input.value.trim();
+          if (newValue && newValue !== value) renameListValue(listKey, value, newValue);
+          renderAllListEditors();
+        };
+        input.addEventListener("blur", commit);
+        input.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") { e.preventDefault(); input.blur(); }
+          if (e.key === "Escape") { e.preventDefault(); committed = true; renderAllListEditors(); }
+        });
+      });
+
+      row.querySelector(".list-editor-delete").addEventListener("click", () => {
+        const err = deleteListValue(listKey, value);
+        if (err) {
+          let msg = row.querySelector(".list-editor-error");
+          if (!msg) {
+            msg = document.createElement("div");
+            msg.className = "list-editor-error";
+            row.appendChild(msg);
+          }
+          msg.textContent = err;
+        } else {
+          renderAllListEditors();
+        }
+      });
+    });
+
+    const addInput = containerEl.querySelector(".list-editor-add-input");
+    const addBtn = containerEl.querySelector(".list-editor-add-btn");
+    const doAdd = () => {
+      const v = addInput.value.trim();
+      if (!v) return;
+      addListValue(listKey, v);
+      renderAllListEditors();
+    };
+    addBtn.addEventListener("click", doAdd);
+    addInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); doAdd(); } });
+  }
+
+  function renderAllListEditors() {
+    renderListEditor(document.getElementById("expenseCategoryList"), "expenseCategories");
+    renderListEditor(document.getElementById("incomeCategoryList"), "incomeCategories");
+    renderListEditor(document.getElementById("paymentMethodListMgmt"), "paymentMethods");
+    populateCategories();
+    populatePaymentMethodOptions(paymentMethodInput);
+    populatePaymentMethodOptions(billPaymentMethodInput);
+    populateTemplateCategories();
+    populatePaymentMethodOptions(templatePaymentMethodInput);
+  }
+
+  // List sections start collapsed (each panel already carries `hidden` in
+  // index.html) to keep Settings from being dominated by long lists.
+  function setupCollapsible(toggleId, panelEl) {
+    const toggle = document.getElementById(toggleId);
+    toggle.addEventListener("click", () => {
+      const expanded = !panelEl.hidden;
+      panelEl.hidden = expanded;
+      toggle.setAttribute("aria-expanded", String(!expanded));
+    });
+  }
+  setupCollapsible("expenseCategoryToggle", document.getElementById("expenseCategoryList"));
+  setupCollapsible("incomeCategoryToggle", document.getElementById("incomeCategoryList"));
+  setupCollapsible("paymentMethodToggle", document.getElementById("paymentMethodListMgmt"));
+
   populateCurrencyOptions();
   applyTheme(settings.theme);
 
@@ -642,6 +1390,11 @@
 
   // ---------- Init ----------
   populateCategories();
+  populatePaymentMethodOptions(paymentMethodInput);
+  populatePaymentMethodOptions(billPaymentMethodInput);
+  populatePaymentMethodOptions(templatePaymentMethodInput);
+  populateTemplateCategories();
+  populateTemplatePicker();
   renderAll();
 
   // ---------- Service worker ----------

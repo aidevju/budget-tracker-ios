@@ -98,6 +98,11 @@
       </div>
     </div>
 
+    <div class="cc-card" id="ccCard" hidden>
+      <span class="cc-label">Credit Cards</span>
+      <div class="cc-list" id="ccList"></div>
+    </div>
+
     <div class="trend-card" id="trendCard" hidden>
       <div class="trend-label-row">
         <span class="trend-label">Last 6 months</span>
@@ -107,6 +112,15 @@
     </div>
 
     <p class="empty-state" id="dashboardEmpty" hidden>Add some transactions to see insights here.</p>
+  </div>
+
+  <!-- Templates screen: manage recurring-expense/income templates -->
+  <div id="templatesScreen" hidden>
+    <div class="list-header-row">
+      <h1 class="screen-title">Templates</h1>
+      <button type="button" class="link-btn" id="addTemplateBtn">+ Add</button>
+    </div>
+    <div id="templateList" class="tx-list"></div>
   </div>
 
   <!-- Settings screen -->
@@ -131,6 +145,36 @@
       <span>Monthly expense target (optional)</span>
       <input type="number" id="targetInput" inputmode="decimal" step="0.01" min="0" placeholder="No target set">
     </label>
+
+    <label class="field">
+      <span>Credit card bill suggestion window (days)</span>
+      <input type="number" id="ccWindowInput" inputmode="numeric" min="1" step="1" placeholder="60">
+    </label>
+
+    <div class="settings-group">
+      <button type="button" class="settings-label collapsible-toggle" id="expenseCategoryToggle" aria-expanded="false">
+        <span>Expense categories</span>
+        <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+      <div class="list-editor" id="expenseCategoryList" hidden></div>
+    </div>
+
+    <div class="settings-group">
+      <button type="button" class="settings-label collapsible-toggle" id="incomeCategoryToggle" aria-expanded="false">
+        <span>Income categories</span>
+        <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+      <div class="list-editor" id="incomeCategoryList" hidden></div>
+    </div>
+
+    <div class="settings-group">
+      <button type="button" class="settings-label collapsible-toggle" id="paymentMethodToggle" aria-expanded="false">
+        <span>Payment methods</span>
+        <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+      <div class="list-editor" id="paymentMethodListMgmt" hidden></div>
+    </div>
+    <p class="settings-caption">Renaming a value updates existing transactions automatically. A value in use by any transaction can't be deleted.</p>
   </div>
 
 </div>
@@ -149,6 +193,10 @@
     <button type="button" class="tab" data-screen="dashboard" aria-label="Dashboard">
       <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 19V11"/><path d="M12 19V5"/><path d="M19 19v-6"/></svg></span>
       <span class="lb">Dashboard</span>
+    </button>
+    <button type="button" class="tab" data-screen="templates" aria-label="Templates">
+      <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg></span>
+      <span class="lb">Templates</span>
     </button>
     <button type="button" class="tab" data-screen="settings" aria-label="Settings">
       <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="7" x2="20" y2="7"/><circle cx="9" cy="7" r="2.1" fill="currentColor" stroke="none"/><line x1="4" y1="12" x2="20" y2="12"/><circle cx="16" cy="12" r="2.1" fill="currentColor" stroke="none"/><line x1="4" y1="17" x2="20" y2="17"/><circle cx="11" cy="17" r="2.1" fill="currentColor" stroke="none"/></svg></span>
@@ -169,6 +217,13 @@
     </div>
 
     <form id="txForm">
+      <label class="field" id="templatePickerField">
+        <span>Template</span>
+        <select id="templatePickerInput">
+          <option value="">Use a template (optional)</option>
+        </select>
+      </label>
+
       <label class="field">
         <span>Amount</span>
         <input type="number" id="amountInput" inputmode="decimal" step="0.01" min="0" placeholder="0.00" required>
@@ -177,6 +232,23 @@
       <label class="field">
         <span>Category</span>
         <select id="categoryInput" required></select>
+      </label>
+
+      <label class="field autosuggest-field">
+        <span>Subcategory (optional)</span>
+        <input type="text" id="subcategoryInput" autocomplete="off" maxlength="60" placeholder="e.g. Groceries">
+        <div class="autosuggest-list" id="subcategorySuggestions" hidden></div>
+      </label>
+
+      <label class="field">
+        <span>Payment method</span>
+        <select id="paymentMethodInput" required></select>
+      </label>
+
+      <label class="field autosuggest-field">
+        <span>Account (optional)</span>
+        <input type="text" id="accountInput" autocomplete="off" maxlength="60" placeholder="e.g. BDO, HSBC -CC">
+        <div class="autosuggest-list" id="accountSuggestions" hidden></div>
       </label>
 
       <label class="field">
@@ -189,6 +261,11 @@
         <input type="date" id="dateInput" required>
       </label>
 
+      <div class="linked-charges" id="linkedChargesSection" hidden>
+        <button type="button" class="link-btn" id="linkedChargesToggle">Includes 0 charges — View</button>
+        <div class="linked-charges-list" id="linkedChargesList" hidden></div>
+      </div>
+
       <p class="form-error" id="formError" hidden></p>
 
       <div class="sheet-actions">
@@ -196,6 +273,116 @@
         <div class="sheet-actions-right">
           <button type="button" class="btn-secondary" id="cancelBtn">Cancel</button>
           <button type="submit" class="btn-primary" id="saveBtn">Save</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Pay Card Bill sheet: reconcile a batch of credit-card charges against a statement -->
+<div class="sheet-backdrop" id="billSheetBackdrop">
+  <div class="sheet" id="billSheet" role="dialog" aria-modal="true" aria-labelledby="billSheetTitle">
+    <div class="sheet-handle"></div>
+    <h2 id="billSheetTitle">Pay Card Bill</h2>
+
+    <form id="billForm">
+      <label class="field">
+        <span>Bill date</span>
+        <input type="date" id="billDateInput" required>
+      </label>
+
+      <label class="field">
+        <span>Statement amount</span>
+        <input type="number" id="billAmountInput" inputmode="decimal" step="0.01" min="0" placeholder="0.00" required>
+      </label>
+
+      <label class="field">
+        <span>Paid via</span>
+        <select id="billPaymentMethodInput" required></select>
+      </label>
+
+      <label class="field autosuggest-field">
+        <span>Paid from account (optional)</span>
+        <input type="text" id="billPaidAccountInput" autocomplete="off" maxlength="60" placeholder="e.g. BDO checking">
+        <div class="autosuggest-list" id="billPaidAccountSuggestions" hidden></div>
+      </label>
+
+      <div class="bill-summary">
+        <div class="bill-summary-row"><span>Selected charges</span><span id="billSelectedCount" class="mono">0</span></div>
+        <div class="bill-summary-row"><span>Running sum</span><span id="billRunningSum" class="mono">$0.00</span></div>
+        <div class="bill-summary-row"><span>Variance</span><span id="billVariance" class="mono">—</span></div>
+      </div>
+
+      <div class="bill-candidates-header">
+        <span>Unbilled charges</span>
+        <button type="button" class="link-btn" id="billShowOlderToggle">Show older charges</button>
+      </div>
+      <div class="bill-candidates-list" id="billCandidatesList"></div>
+      <p class="empty-state" id="billCandidatesEmpty" hidden>No unbilled charges found for this card.</p>
+
+      <p class="form-error" id="billFormError" hidden></p>
+
+      <div class="sheet-actions">
+        <div class="sheet-actions-right">
+          <button type="button" class="btn-secondary" id="billCancelBtn">Cancel</button>
+          <button type="submit" class="btn-primary">Confirm &amp; Reconcile</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Add / edit recurring template sheet -->
+<div class="sheet-backdrop" id="templateSheetBackdrop">
+  <div class="sheet" id="templateSheet" role="dialog" aria-modal="true" aria-labelledby="templateSheetTitle">
+    <div class="sheet-handle"></div>
+    <h2 id="templateSheetTitle">Add template</h2>
+
+    <div class="type-toggle" id="templateTypeToggle">
+      <button type="button" class="type-btn active" data-type="expense">Expense</button>
+      <button type="button" class="type-btn" data-type="income">Income</button>
+    </div>
+
+    <form id="templateForm">
+      <label class="field">
+        <span>Category</span>
+        <select id="templateCategoryInput" required></select>
+      </label>
+
+      <label class="field autosuggest-field">
+        <span>Subcategory (optional)</span>
+        <input type="text" id="templateSubcategoryInput" autocomplete="off" maxlength="60" placeholder="e.g. Groceries">
+        <div class="autosuggest-list" id="templateSubcategorySuggestions" hidden></div>
+      </label>
+
+      <label class="field">
+        <span>Payment method</span>
+        <select id="templatePaymentMethodInput" required></select>
+      </label>
+
+      <label class="field autosuggest-field">
+        <span>Account (optional)</span>
+        <input type="text" id="templateAccountInput" autocomplete="off" maxlength="60" placeholder="e.g. BDO, HSBC -CC">
+        <div class="autosuggest-list" id="templateAccountSuggestions" hidden></div>
+      </label>
+
+      <label class="field">
+        <span>Note (optional)</span>
+        <input type="text" id="templateNoteInput" placeholder="What is it for?" maxlength="60">
+      </label>
+
+      <label class="field">
+        <span>Amount (optional)</span>
+        <input type="number" id="templateAmountInput" inputmode="decimal" step="0.01" min="0" placeholder="Leave blank to fill in later">
+      </label>
+
+      <p class="form-error" id="templateFormError" hidden></p>
+
+      <div class="sheet-actions">
+        <button type="button" class="btn-text" id="templateDeleteBtn" hidden>Delete</button>
+        <div class="sheet-actions-right">
+          <button type="button" class="btn-secondary" id="templateCancelBtn">Cancel</button>
+          <button type="submit" class="btn-primary">Save</button>
         </div>
       </div>
     </form>
