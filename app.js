@@ -1563,6 +1563,133 @@
     renderAll();
   });
 
+  // ---------- Clear Entries ----------
+  const clearEntriesBackdrop = document.getElementById("clearEntriesSheetBackdrop");
+  const clearEntriesBtn = document.getElementById("clearEntriesBtn");
+  const clearEntriesModeToggle = document.getElementById("clearEntriesModeToggle");
+  const clearEntriesDaysField = document.getElementById("clearEntriesDaysField");
+  const clearEntriesDaysInput = document.getElementById("clearEntriesDaysInput");
+  const clearEntriesCount = document.getElementById("clearEntriesCount");
+  const clearEntriesError = document.getElementById("clearEntriesError");
+  const clearEntriesCancelBtn = document.getElementById("clearEntriesCancelBtn");
+  const clearEntriesConfirmBtn = document.getElementById("clearEntriesConfirmBtn");
+  const clearEntriesConfirmMessage = document.getElementById("clearEntriesConfirmMessage");
+
+  let clearEntriesMode = "all";
+  let clearEntriesPending = null; // candidate transactions awaiting the "are you sure" step, or null while still choosing
+
+  // A transaction is "linked" if it's a reconciled charge (points at a bill
+  // payment) or is itself a bill payment that charges point back to.
+  function isTransactionLinked(t) {
+    if (t.reconciledBillId) return true;
+    return transactions.some(other => other.reconciledBillId === t.id);
+  }
+
+  function getClearCandidates(mode, days) {
+    if (mode === "all") return transactions.slice();
+    const cutoff = new Date();
+    cutoff.setHours(0, 0, 0, 0);
+    cutoff.setDate(cutoff.getDate() - (days - 1));
+    return transactions.filter(t => new Date(t.date + "T00:00:00") >= cutoff);
+  }
+
+  function updateClearEntriesPreview() {
+    clearEntriesError.hidden = true;
+    const days = parseInt(clearEntriesDaysInput.value, 10);
+    if (clearEntriesMode === "days" && (!days || days <= 0)) {
+      clearEntriesCount.textContent = "Enter a number of days.";
+      return;
+    }
+    const candidates = getClearCandidates(clearEntriesMode, days);
+    clearEntriesCount.textContent = `${candidates.length} entr${candidates.length === 1 ? "y" : "ies"} will be deleted.`;
+  }
+
+  // Resets the sheet to the "choose what to delete" step, hiding the
+  // "are you sure" step from any previous pass.
+  function resetClearEntriesStep() {
+    clearEntriesPending = null;
+    clearEntriesModeToggle.hidden = false;
+    clearEntriesDaysField.hidden = clearEntriesMode !== "days";
+    clearEntriesCount.hidden = false;
+    clearEntriesError.hidden = true;
+    clearEntriesConfirmMessage.hidden = true;
+    clearEntriesConfirmBtn.textContent = "Clear";
+  }
+
+  function openClearEntriesSheet() {
+    clearEntriesMode = "all";
+    document.querySelectorAll("#clearEntriesModeToggle .type-btn").forEach(b => b.classList.toggle("active", b.dataset.mode === "all"));
+    clearEntriesDaysInput.value = "";
+    resetClearEntriesStep();
+    updateClearEntriesPreview();
+    clearEntriesBackdrop.classList.add("open");
+  }
+
+  function closeClearEntriesSheet() {
+    clearEntriesBackdrop.classList.remove("open");
+  }
+
+  clearEntriesBtn.addEventListener("click", openClearEntriesSheet);
+  clearEntriesCancelBtn.addEventListener("click", closeClearEntriesSheet);
+  clearEntriesBackdrop.addEventListener("click", (e) => { if (e.target === clearEntriesBackdrop) closeClearEntriesSheet(); });
+
+  clearEntriesModeToggle.addEventListener("click", (e) => {
+    const btn = e.target.closest(".type-btn");
+    if (!btn) return;
+    clearEntriesMode = btn.dataset.mode;
+    document.querySelectorAll("#clearEntriesModeToggle .type-btn").forEach(b => b.classList.toggle("active", b === btn));
+    clearEntriesDaysField.hidden = clearEntriesMode !== "days";
+    updateClearEntriesPreview();
+  });
+
+  clearEntriesDaysInput.addEventListener("input", updateClearEntriesPreview);
+
+  // First click validates the selection and swaps in an "are you sure" step
+  // (in-sheet, not window.confirm — confirm() is unreliable in a standalone
+  // iOS home-screen PWA, where it can silently no-op). Second click deletes.
+  clearEntriesConfirmBtn.addEventListener("click", () => {
+    if (clearEntriesPending) {
+      const idsToDelete = new Set(clearEntriesPending.map(t => t.id));
+      transactions = transactions.filter(t => !idsToDelete.has(t.id));
+      saveTransactions();
+      closeClearEntriesSheet();
+      renderAll();
+      return;
+    }
+
+    const days = parseInt(clearEntriesDaysInput.value, 10);
+    if (clearEntriesMode === "days" && (!days || days <= 0)) {
+      clearEntriesError.textContent = "Enter a valid number of days.";
+      clearEntriesError.hidden = false;
+      return;
+    }
+
+    const candidates = getClearCandidates(clearEntriesMode, days);
+    if (candidates.length === 0) {
+      clearEntriesError.textContent = "No entries match.";
+      clearEntriesError.hidden = false;
+      return;
+    }
+
+    const linkedCount = candidates.filter(isTransactionLinked).length;
+    if (linkedCount > 0) {
+      clearEntriesError.textContent = `Can't clear — ${linkedCount} of these ${linkedCount === 1 ? "entry is" : "entries are"} linked to a credit card bill payment. Unlink or reconcile ${linkedCount === 1 ? "it" : "them"} individually first.`;
+      clearEntriesError.hidden = false;
+      return;
+    }
+
+    clearEntriesPending = candidates;
+    clearEntriesModeToggle.hidden = true;
+    clearEntriesDaysField.hidden = true;
+    clearEntriesCount.hidden = true;
+    clearEntriesError.hidden = true;
+
+    const rangeLabel = clearEntriesMode === "all" ? "ALL" : `the last ${days} day${days === 1 ? "" : "s"} of`;
+    clearEntriesConfirmMessage.textContent = `Are you sure? This will permanently delete ${rangeLabel} entries (${candidates.length} total) and can't be undone.`;
+    clearEntriesConfirmMessage.hidden = false;
+    clearEntriesConfirmBtn.textContent = "Yes, delete";
+  });
+
   // ---------- Theme ----------
   function resolvedIsDark(theme) {
     if (theme === "dark") return true;
