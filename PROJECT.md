@@ -43,13 +43,14 @@ Apple Developer account, and no Mac required.
     independent transaction — there's no persistent link back.
   - **Settings**: theme (light / dark / system), a currency symbol
     picker (defaults to no symbol), an optional monthly expense
-    target, the credit-card bill suggestion window (days), and an
-    editable-lists section for Expense Categories / Income Categories
-    / Payment Methods (add, rename — cascades to existing
-    transactions *and* templates — and delete, blocked while a value
-    is still in use by either), each collapsed by default to keep the
-    screen from being dominated by long lists. A full tab/screen, not
-    a popup sheet, for consistency with the other tabs.
+    target, the credit-card bill suggestion window (days), an
+    **Import CSV** action (see below), and an editable-lists section
+    for Expense Categories / Income Categories / Payment Methods (add,
+    rename — cascades to existing transactions *and* templates — and
+    delete, blocked while a value is still in use by either), each
+    collapsed by default to keep the screen from being dominated by
+    long lists. A full tab/screen, not a popup sheet, for consistency
+    with the other tabs.
 - The floating "+" add-transaction button only shows on the Month
   tab (hidden on Dashboard/Credit Card Bills/Templates/Settings), positioned above the
   tab bar.
@@ -58,6 +59,28 @@ Apple Developer account, and no Mac required.
   directly in Excel, Numbers, or Google Sheets. No `.xlsx` export,
   since a real Excel binary format needs an external library, which
   would break the no-dependencies/fully-offline setup.
+- Import (Settings) bulk-loads transactions from a CSV file — the
+  other half of Export, for restoring/backing up data or bringing in
+  historical records from elsewhere. Columns are matched by name
+  (case-insensitive), not position, so a reordered file still works;
+  unrecognized extra columns are ignored, which is what lets a
+  straight re-import of the app's own Export file work unedited — the
+  header row is *found* rather than assumed to be row 1, so Export's
+  title/summary/category-breakdown preamble ahead of its Transactions
+  section is skipped automatically. An unrecognized Category or
+  Payment Method is auto-created rather than rejected (same
+  `addListValue()` Settings' list editor uses). A non-blank
+  `Reconciled With` cell is matched, within the same file only,
+  against another row's exact `"<date> — <note>"` string — precisely
+  what Export writes into that column, so an Export → Import
+  round-trip restores `reconciledBillId` links intact. Row-level
+  validation: a bad row (missing/invalid Date, Type, or Amount) is
+  skipped, not fatal to the whole import; every rejected row and its
+  reason is listed in a preview sheet before anything is written,
+  alongside row counts, new list values, Reconciled With match counts,
+  income/expense totals, and the date range covered. No
+  de-duplication against existing transactions — importing the same
+  file twice creates duplicate rows.
 - Fully offline-capable once installed — a service worker caches the
   app shell, and all data lives in the browser's `localStorage` on
   the user's own device. No backend, no accounts, no network calls.
@@ -75,14 +98,15 @@ static host.
 budget-tracker/
 ├── index.html          Page shell: Month/Dashboard/Templates/Settings
 │                        screens plus the bottom tab bar, the add/edit
-│                        transaction sheet, the Pay Card Bill sheet, and
-│                        the add/edit template sheet (three modals now,
-│                        same open/close mechanics), the template picker
-│                        inside the transaction sheet, plus a custom
-│                        autosuggest dropdown for subcategory/account.
-│                        Screens are plain hidden-attribute divs toggled
-│                        in app.js — no router. Icons are inline SVG
-│                        (no icon font/library)
+│                        transaction sheet, the Pay Card Bill sheet, the
+│                        add/edit template sheet, and the Import CSV
+│                        preview sheet (four modals now, same open/close
+│                        mechanics), the template picker inside the
+│                        transaction sheet, plus a custom autosuggest
+│                        dropdown for subcategory/account. Screens are
+│                        plain hidden-attribute divs toggled in app.js —
+│                        no router. Icons are inline SVG (no icon
+│                        font/library)
 ├── styles.css           All styling. CSS custom properties in :root
 │                        define the theme; dark mode overrides the
 │                        same variables under [data-theme="dark"]
@@ -223,8 +247,9 @@ keep serving the old cached version indefinitely.
 
 (Not started — ideas only.)
 
-- Import data (JSON or CSV) — monthly CSV export exists, but there's
-  still no way to restore/back up all data or bring in past records
+- De-duplication on Import — importing the same CSV file twice
+  currently creates duplicate transactions; flagged in the Import
+  preview sheet as a known v1 limitation, not blocking logic
 - Multiple accounts/wallets
 - Charts beyond the simple category bars and dashboard trend
 - Per-category budgets/limits with progress indicators (the

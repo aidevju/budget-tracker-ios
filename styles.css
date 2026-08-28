@@ -861,6 +861,52 @@ h1, h2 { margin: 0; font-weight: 600; }
   margin-bottom: 16px;
 }
 
+/* Import CSV sheet */
+.import-summary-line {
+  font-size: 14px;
+  margin: 0 0 14px;
+}
+.import-block { margin-bottom: 16px; }
+.import-block-label {
+  display: block;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-soft);
+  margin-bottom: 6px;
+}
+.import-error-list, .import-new-values-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--ink-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.import-new-values-list { color: var(--ink); }
+.import-totals {
+  background: var(--paper);
+  border-radius: var(--radius-control);
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.import-totals-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+.import-totals-row .mono { color: var(--ink); }
+.import-caption {
+  font-size: 12px;
+  color: var(--ink-soft);
+  margin: 0 0 4px;
+}
+
 .sheet-actions {
   display: flex;
   align-items: center;
@@ -878,6 +924,7 @@ h1, h2 { margin: 0; font-weight: 600; }
   font-family: inherit;
 }
 .btn-primary { background: var(--ink); color: var(--paper-raised); }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-secondary { background: var(--paper); color: var(--ink); }
 .btn-text { background: none; color: var(--expense); padding-left: 0; }
 
