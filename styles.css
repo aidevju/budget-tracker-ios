@@ -116,6 +116,11 @@ h1, h2 { margin: 0; font-weight: 600; }
 /* Dashboard / Settings screen heading */
 .screen-title { font-size: 19px; letter-spacing: -0.01em; margin-bottom: 18px; }
 
+/* Drill-down screen heading (back button + title), e.g. Credit Card Bills */
+.subscreen-header { display: flex; align-items: center; gap: 2px; margin-bottom: 10px; }
+.subscreen-header h1 { font-size: 19px; letter-spacing: -0.01em; }
+.subscreen-header .icon-btn { margin-left: -10px; }
+
 .icon-btn {
   width: 44px;
   height: 44px;
@@ -309,14 +314,21 @@ h1, h2 { margin: 0; font-weight: 600; }
   box-shadow: 0 1px 0 var(--line);
   margin-bottom: 14px;
 }
+.cc-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
 .cc-label {
   display: block;
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--ink-soft);
-  margin-bottom: 12px;
 }
+.cc-header .cc-label { margin-bottom: 0; }
+.cc-empty { font-size: 13px; color: var(--ink-soft); }
 .cc-list { display: flex; flex-direction: column; gap: 12px; }
 .cc-row { display: flex; align-items: center; gap: 10px; }
 .cc-account {
@@ -661,6 +673,7 @@ h1, h2 { margin: 0; font-weight: 600; }
 /* Read-only "Includes N charges" block in the edit sheet */
 .linked-charges { margin: -4px 0 12px; }
 .linked-charges-list { display: flex; flex-direction: column; margin-top: 8px; }
+.linked-charges-list[hidden] { display: none; }
 .linked-charge-row {
   display: flex;
   align-items: center;
@@ -729,6 +742,70 @@ h1, h2 { margin: 0; font-weight: 600; }
 .bill-candidate-date { font-size: 12px; color: var(--ink-soft); }
 .bill-candidate-note { font-size: 14px; }
 .bill-candidate-amount { flex-shrink: 0; font-size: 14px; }
+
+/* Credit Card Bills screen: list of past bill payments, each expandable
+   to show the charges it reconciled. Children are set off from their
+   parent bill by indentation + a connector line (not a filled panel
+   or card), and pulled to a quieter text color so the list stays calm
+   until a row is expanded. Scoped under .bill-history-item so the
+   plainer "Includes N charges" block in the edit sheet is untouched. */
+.bill-history-list { display: flex; flex-direction: column; }
+.bill-history-item { border-bottom: 1px solid var(--line); }
+.bill-history-item:last-child { border-bottom: none; }
+.bill-history-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 0;
+  width: 100%;
+  background: none;
+  border: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.bill-history-meta { flex-shrink: 0; display: flex; align-items: center; gap: 9px; }
+.bill-history-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11.5px;
+  font-family: var(--font-mono);
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+.bill-history-count .count-icon { width: 13px; height: 13px; flex-shrink: 0; }
+.bill-history-row .chevron { width: 16px; height: 16px; flex-shrink: 0; color: var(--ink-soft); transition: transform 0.15s ease; }
+.bill-history-row.open .chevron { transform: rotate(180deg); }
+
+.bill-history-item .linked-charges-list {
+  margin: 2px 0 14px 20px;
+  padding-left: 15px;
+  border-left: 2px solid var(--line-strong);
+}
+.bill-history-item .linked-charge-row { position: relative; padding: 7px 0; }
+.bill-history-item .linked-charge-row::before {
+  content: "";
+  position: absolute;
+  left: -20.5px;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--line-strong);
+  transform: translateY(-50%);
+}
+.bill-history-item .linked-charge-row .bill-candidate-date,
+.bill-history-item .linked-charge-row .bill-candidate-note {
+  color: var(--ink-soft);
+  opacity: 0.7;
+}
+.bill-history-item .linked-charge-row .bill-candidate-note { font-size: 12.5px; }
+.bill-history-item .linked-charge-row .bill-candidate-date { font-size: 10.5px; }
+.bill-history-item .linked-charge-row .bill-candidate-amount { font-size: 12.5px; color: var(--ink); }
+
+.bill-history-none { font-size: 13px; color: var(--ink-soft); margin: 0 0 14px 35px; }
 
 /* Settings: editable dropdown lists (categories / payment methods) */
 .list-editor { display: flex; flex-direction: column; }

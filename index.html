@@ -99,7 +99,10 @@
     </div>
 
     <div class="cc-card" id="ccCard" hidden>
-      <span class="cc-label">Credit Cards</span>
+      <div class="cc-header">
+        <span class="cc-label">Credit Cards</span>
+        <button type="button" class="link-btn" id="viewBillHistoryBtn">View all</button>
+      </div>
       <div class="cc-list" id="ccList"></div>
     </div>
 
@@ -112,6 +115,19 @@
     </div>
 
     <p class="empty-state" id="dashboardEmpty" hidden>Add some transactions to see insights here.</p>
+  </div>
+
+  <!-- Credit Card Bills screen: drill-down from Dashboard, not part of the tab bar.
+       Lists every bill payment ever made and the charges each one reconciled. -->
+  <div id="billHistoryScreen" hidden>
+    <header class="subscreen-header">
+      <button type="button" class="icon-btn" id="billHistoryBackBtn" aria-label="Back to Dashboard">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="22" height="22"><path d="M15 6l-6 6 6 6"/></svg>
+      </button>
+      <h1>Credit Card Bills</h1>
+    </header>
+    <div id="billHistoryList" class="bill-history-list"></div>
+    <p class="empty-state" id="billHistoryEmpty" hidden>No credit card bills paid yet.</p>
   </div>
 
   <!-- Templates screen: manage recurring-expense/income templates -->

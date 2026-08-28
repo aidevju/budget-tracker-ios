@@ -9,7 +9,8 @@ Apple Developer account, and no Mac required.
 - Add income and expenses with a category, optional note, and date.
 - Four screens, swapped in place via a bottom tab bar (no page
   navigation, no router — no top app bar either, the tab bar is the
-  only persistent chrome):
+  only persistent chrome), plus one drill-down screen (Credit Card
+  Bills) reached from Dashboard rather than the tab bar:
   - **Month** (default tab): prev/next month navigation, a
     receipt-styled balance summary, monthly expense target progress,
     a category breakdown (expenses only), a day-grouped transaction
@@ -21,8 +22,17 @@ Apple Developer account, and no Mac required.
     drill-down. Also shows a **Credit Cards** panel — one row per
     account with a nonzero unbilled Credit-Card balance (plus an
     "Unspecified card" bucket for charges with no account set), each
-    with a "Pay Bill" action that opens the Pay Card Bill sheet. The
-    panel is hidden entirely when there's nothing unbilled.
+    with a "Pay Bill" action that opens the Pay Card Bill sheet, plus a
+    "View all" link that opens the **Credit Card Bills** screen (below).
+    The panel is hidden entirely only when there's nothing unbilled
+    *and* no bill has ever been paid.
+  - **Credit Card Bills** (drill-down, reached only via "View all" on
+    Dashboard's Credit Cards panel, not part of the tab bar): a back
+    arrow returns to Dashboard. Lists every past bill-payment
+    transaction, newest first, each expandable in place to show the
+    charges it reconciled — read-only, no tap-to-edit. Reuses the same
+    linked-charge row rendering as the "Includes N charges" block in
+    the transaction edit sheet.
   - **Templates**: a flat, dateless list of recurring income/expense
     presets (category, subcategory, payment method, account, note,
     and an optional amount), each shown with a "—" when no amount is
@@ -41,7 +51,7 @@ Apple Developer account, and no Mac required.
     screen from being dominated by long lists. A full tab/screen, not
     a popup sheet, for consistency with the other tabs.
 - The floating "+" add-transaction button only shows on the Month
-  tab (hidden on Dashboard/Templates/Settings), positioned above the
+  tab (hidden on Dashboard/Credit Card Bills/Templates/Settings), positioned above the
   tab bar.
 - Export downloads the currently viewed month as a CSV file (summary,
   category breakdown, then the full transaction list) — opens
