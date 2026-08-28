@@ -168,6 +168,12 @@
     </label>
 
     <div class="settings-group">
+      <span class="settings-label">Data</span>
+      <button type="button" class="link-btn" id="importBtn">Import CSV</button>
+      <input type="file" id="importFileInput" accept=".csv" hidden>
+    </div>
+
+    <div class="settings-group">
       <button type="button" class="settings-label collapsible-toggle" id="expenseCategoryToggle" aria-expanded="false">
         <span>Expense categories</span>
         <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
@@ -402,6 +408,47 @@
         </div>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- Import CSV sheet: preview + confirm before committing parsed rows -->
+<div class="sheet-backdrop" id="importSheetBackdrop">
+  <div class="sheet" id="importSheet" role="dialog" aria-modal="true" aria-labelledby="importSheetTitle">
+    <div class="sheet-handle"></div>
+    <h2 id="importSheetTitle">Import CSV</h2>
+
+    <p class="form-error" id="importError" hidden></p>
+
+    <div id="importSummaryBody">
+      <p class="import-summary-line" id="importRowSummary"></p>
+
+      <div class="import-block" id="importRejectedBlock" hidden>
+        <span class="import-block-label">Rows skipped</span>
+        <ul class="import-error-list" id="importErrorList"></ul>
+      </div>
+
+      <div class="import-block" id="importNewValuesBlock" hidden>
+        <span class="import-block-label">New values to add</span>
+        <ul class="import-new-values-list" id="importNewValuesList"></ul>
+      </div>
+
+      <p class="import-summary-line" id="importReconciledSummary" hidden></p>
+
+      <div class="import-totals" id="importTotals">
+        <div class="import-totals-row"><span>Income</span><span id="importTotalIncome" class="mono">$0.00</span></div>
+        <div class="import-totals-row"><span>Expenses</span><span id="importTotalExpense" class="mono">$0.00</span></div>
+        <div class="import-totals-row"><span>Date range</span><span id="importDateRange" class="mono">—</span></div>
+      </div>
+
+      <p class="import-caption">Importing does not check for duplicates — importing the same file twice will create duplicate transactions.</p>
+    </div>
+
+    <div class="sheet-actions">
+      <div class="sheet-actions-right">
+        <button type="button" class="btn-secondary" id="importCancelBtn">Cancel</button>
+        <button type="button" class="btn-primary" id="importConfirmBtn">Import</button>
+      </div>
+    </div>
   </div>
 </div>
 

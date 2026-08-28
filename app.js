@@ -1251,6 +1251,318 @@
     populateTemplatePicker();
   });
 
+  // ---------- Import CSV ----------
+  // Accepts a plain transactions CSV (header row + data rows, columns
+  // matched by name not position) — not the multi-section Export CSV file,
+  // though Export's own Transactions section happens to be a subset of this
+  // shape, so re-importing an exported file works without editing it first.
+  const IMPORT_COLUMN_MAP = {
+    "date": "date",
+    "type": "type",
+    "category": "category",
+    "subcategory": "subcategory",
+    "payment method": "paymentMethod",
+    "account": "account",
+    "note": "note",
+    "reconciled with": "reconciledWith",
+    "amount": "amount"
+  };
+
+  // Proper quoted-field CSV reader: handles embedded commas/newlines and
+  // escaped "" inside quotes, which a naive split(",") would corrupt.
+  function parseCSV(text) {
+    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1); // strip UTF-8 BOM (Export writes one)
+    const rows = [];
+    let row = [], field = "", inQuotes = false;
+    let i = 0;
+    const len = text.length;
+    while (i < len) {
+      const c = text[i];
+      if (inQuotes) {
+        if (c === '"') {
+          if (text[i + 1] === '"') { field += '"'; i += 2; continue; }
+          inQuotes = false; i++; continue;
+        }
+        field += c; i++; continue;
+      }
+      if (c === '"') { inQuotes = true; i++; continue; }
+      if (c === ",") { row.push(field); field = ""; i++; continue; }
+      if (c === "\r" || c === "\n") {
+        if (c === "\r" && text[i + 1] === "\n") i++;
+        row.push(field); field = "";
+        rows.push(row); row = [];
+        i++; continue;
+      }
+      field += c; i++;
+    }
+    if (field.length > 0 || row.length > 0) { row.push(field); rows.push(row); }
+    return rows;
+  }
+
+  function buildImportHeaderIndex(headerRow) {
+    const index = {};
+    headerRow.forEach((h, i) => {
+      const key = IMPORT_COLUMN_MAP[h.trim().toLowerCase()];
+      if (key) index[key] = i;
+    });
+    return index;
+  }
+
+  function importCell(rawRow, headerIndex, key) {
+    const idx = headerIndex[key];
+    if (idx === undefined || idx >= rawRow.length) return "";
+    return (rawRow[idx] || "").trim();
+  }
+
+  function isValidISODate(s) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+    if (!m) return false;
+    const y = +m[1], mo = +m[2], d = +m[3];
+    if (mo < 1 || mo > 12) return false;
+    const dt = new Date(y, mo - 1, d);
+    return dt.getFullYear() === y && dt.getMonth() === mo - 1 && dt.getDate() === d;
+  }
+
+  function parseImportAmount(raw) {
+    if (!raw) return NaN;
+    const cleaned = raw.replace(/[^0-9.\-]/g, "");
+    if (!cleaned) return NaN;
+    return parseFloat(cleaned);
+  }
+
+  // Maps one raw data row to a transaction-shaped object, or a rejection
+  // reason. Category/Payment Method are never rejected here — an unknown
+  // value is auto-created at confirm time (see buildImportPreview).
+  function parseImportRow(headerIndex, rawRow) {
+    const dateRaw = importCell(rawRow, headerIndex, "date");
+    if (!isValidISODate(dateRaw)) return { ok: false, reason: "Missing or invalid Date" };
+
+    const typeRaw = importCell(rawRow, headerIndex, "type").toLowerCase();
+    if (typeRaw !== "income" && typeRaw !== "expense") return { ok: false, reason: "Type must be Income or Expense" };
+
+    const category = importCell(rawRow, headerIndex, "category");
+    if (!category) return { ok: false, reason: "Missing Category" };
+
+    const amount = parseImportAmount(importCell(rawRow, headerIndex, "amount"));
+    if (isNaN(amount) || amount <= 0) return { ok: false, reason: "Missing or invalid Amount" };
+
+    return {
+      ok: true,
+      reconciledWithRaw: importCell(rawRow, headerIndex, "reconciledWith"),
+      tx: {
+        type: typeRaw,
+        amount,
+        category,
+        subcategory: importCell(rawRow, headerIndex, "subcategory"),
+        paymentMethod: importCell(rawRow, headerIndex, "paymentMethod") || "Cash",
+        account: importCell(rawRow, headerIndex, "account"),
+        note: importCell(rawRow, headerIndex, "note"),
+        date: dateRaw
+      }
+    };
+  }
+
+  function rejectedRowLabel(raw) {
+    const cells = raw.filter(c => c.trim() !== "").slice(0, 3);
+    return cells.length ? cells.join(", ") : "(blank row)";
+  }
+
+  // Parses the whole file and computes everything the preview needs:
+  // valid/rejected rows, which list values would be auto-created, how many
+  // Reconciled With links resolve within this file, and summary totals.
+  // Nothing is written to state here — that only happens on confirm.
+  function hasRequiredImportColumns(headerIndex) {
+    return headerIndex.date !== undefined && headerIndex.type !== undefined &&
+      headerIndex.category !== undefined && headerIndex.amount !== undefined;
+  }
+
+  function buildImportPreview(text) {
+    const rows = parseCSV(text).filter(r => r.some(c => c.trim() !== ""));
+    if (rows.length === 0) return { headerError: "The file appears to be empty." };
+
+    // Scan for the header row rather than assuming row 0, so the app's own
+    // multi-section Export CSV (title/summary/category-breakdown preamble
+    // before the Transactions header) can be re-imported directly, not just
+    // a standalone header-first transactions CSV.
+    let headerRowIdx = -1, headerIndex = null;
+    for (let i = 0; i < rows.length; i++) {
+      const candidate = buildImportHeaderIndex(rows[i]);
+      if (hasRequiredImportColumns(candidate)) { headerRowIdx = i; headerIndex = candidate; break; }
+    }
+    if (headerRowIdx === -1) {
+      return { headerError: "The file is missing one or more required columns (Date, Type, Category, Amount)." };
+    }
+
+    const validRows = [], rejectedRows = [];
+    rows.slice(headerRowIdx + 1).forEach(raw => {
+      const result = parseImportRow(headerIndex, raw);
+      if (result.ok) validRows.push(result);
+      else rejectedRows.push({ row: raw, reason: result.reason });
+    });
+
+    const seenExpense = new Set(lists.expenseCategories);
+    const seenIncome = new Set(lists.incomeCategories);
+    const seenPM = new Set(lists.paymentMethods);
+    const newExpenseCategories = [], newIncomeCategories = [], newPaymentMethods = [];
+    validRows.forEach(({ tx }) => {
+      if (tx.type === "expense") {
+        if (!seenExpense.has(tx.category) && !newExpenseCategories.includes(tx.category)) newExpenseCategories.push(tx.category);
+      } else if (!seenIncome.has(tx.category) && !newIncomeCategories.includes(tx.category)) {
+        newIncomeCategories.push(tx.category);
+      }
+      if (tx.paymentMethod && !seenPM.has(tx.paymentMethod) && !newPaymentMethods.includes(tx.paymentMethod)) {
+        newPaymentMethods.push(tx.paymentMethod);
+      }
+    });
+
+    const lookup = new Set(validRows.map(({ tx }) => tx.date + " — " + tx.note));
+    let reconciledCount = 0, reconciledResolvedCount = 0;
+    validRows.forEach(({ reconciledWithRaw }) => {
+      if (reconciledWithRaw) {
+        reconciledCount++;
+        if (lookup.has(reconciledWithRaw)) reconciledResolvedCount++;
+      }
+    });
+
+    let totalIncome = 0, totalExpense = 0, dateMin = null, dateMax = null;
+    validRows.forEach(({ tx }) => {
+      if (tx.type === "income") totalIncome += tx.amount; else totalExpense += tx.amount;
+      if (dateMin === null || tx.date < dateMin) dateMin = tx.date;
+      if (dateMax === null || tx.date > dateMax) dateMax = tx.date;
+    });
+
+    return {
+      validRows, rejectedRows,
+      newExpenseCategories, newIncomeCategories, newPaymentMethods,
+      reconciledCount, reconciledResolvedCount,
+      totalIncome, totalExpense, dateMin, dateMax
+    };
+  }
+
+  const importBackdrop = document.getElementById("importSheetBackdrop");
+  const importBtn = document.getElementById("importBtn");
+  const importFileInput = document.getElementById("importFileInput");
+  const importError = document.getElementById("importError");
+  const importSummaryBody = document.getElementById("importSummaryBody");
+  const importRowSummary = document.getElementById("importRowSummary");
+  const importRejectedBlock = document.getElementById("importRejectedBlock");
+  const importErrorList = document.getElementById("importErrorList");
+  const importNewValuesBlock = document.getElementById("importNewValuesBlock");
+  const importNewValuesList = document.getElementById("importNewValuesList");
+  const importReconciledSummary = document.getElementById("importReconciledSummary");
+  const importTotalIncome = document.getElementById("importTotalIncome");
+  const importTotalExpense = document.getElementById("importTotalExpense");
+  const importDateRange = document.getElementById("importDateRange");
+  const importCancelBtn = document.getElementById("importCancelBtn");
+  const importConfirmBtn = document.getElementById("importConfirmBtn");
+
+  let importParseResult = null;
+
+  function renderImportPreview(result) {
+    if (result.headerError) {
+      importError.hidden = false;
+      importError.textContent = result.headerError;
+      importSummaryBody.hidden = true;
+      importConfirmBtn.disabled = true;
+      return;
+    }
+    importError.hidden = true;
+    importSummaryBody.hidden = false;
+
+    const total = result.validRows.length + result.rejectedRows.length;
+    importRowSummary.textContent = `${result.validRows.length} of ${total} row${total === 1 ? "" : "s"} ready to import`;
+
+    if (result.rejectedRows.length > 0) {
+      importRejectedBlock.hidden = false;
+      const shown = result.rejectedRows.slice(0, 10);
+      importErrorList.innerHTML = shown.map(r => `<li>${escapeHtml(rejectedRowLabel(r.row))} — ${escapeHtml(r.reason)}</li>`).join("")
+        + (result.rejectedRows.length > shown.length ? `<li>…and ${result.rejectedRows.length - shown.length} more</li>` : "");
+    } else {
+      importRejectedBlock.hidden = true;
+      importErrorList.innerHTML = "";
+    }
+
+    const newValueLines = [];
+    if (result.newExpenseCategories.length) newValueLines.push(`Expense categor${result.newExpenseCategories.length === 1 ? "y" : "ies"}: ${result.newExpenseCategories.join(", ")}`);
+    if (result.newIncomeCategories.length) newValueLines.push(`Income categor${result.newIncomeCategories.length === 1 ? "y" : "ies"}: ${result.newIncomeCategories.join(", ")}`);
+    if (result.newPaymentMethods.length) newValueLines.push(`Payment method${result.newPaymentMethods.length === 1 ? "" : "s"}: ${result.newPaymentMethods.join(", ")}`);
+    if (newValueLines.length > 0) {
+      importNewValuesBlock.hidden = false;
+      importNewValuesList.innerHTML = newValueLines.map(l => `<li>${escapeHtml(l)}</li>`).join("");
+    } else {
+      importNewValuesBlock.hidden = true;
+      importNewValuesList.innerHTML = "";
+    }
+
+    if (result.reconciledCount > 0) {
+      importReconciledSummary.hidden = false;
+      const unresolved = result.reconciledCount - result.reconciledResolvedCount;
+      importReconciledSummary.textContent = unresolved > 0
+        ? `${result.reconciledResolvedCount} charge${result.reconciledResolvedCount === 1 ? "" : "s"} will be linked to a bill payment in this file; ${unresolved} reference${unresolved === 1 ? "s" : ""} a bill not included and will stay unbilled.`
+        : `${result.reconciledResolvedCount} charge${result.reconciledResolvedCount === 1 ? "" : "s"} will be linked to a bill payment in this file.`;
+    } else {
+      importReconciledSummary.hidden = true;
+    }
+
+    importTotalIncome.textContent = formatMoney(result.totalIncome);
+    importTotalExpense.textContent = formatMoney(result.totalExpense);
+    importDateRange.textContent = result.dateMin ? `${result.dateMin} to ${result.dateMax}` : "—";
+
+    importConfirmBtn.disabled = result.validRows.length === 0;
+  }
+
+  function openImportSheet(text) {
+    importParseResult = buildImportPreview(text);
+    renderImportPreview(importParseResult);
+    importBackdrop.classList.add("open");
+  }
+
+  function closeImportSheet() {
+    importBackdrop.classList.remove("open");
+    importParseResult = null;
+  }
+
+  importBtn.addEventListener("click", () => importFileInput.click());
+  importFileInput.addEventListener("change", () => {
+    const file = importFileInput.files[0];
+    importFileInput.value = ""; // allow re-selecting the same file later
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => openImportSheet(reader.result);
+    reader.readAsText(file);
+  });
+
+  importCancelBtn.addEventListener("click", closeImportSheet);
+  importBackdrop.addEventListener("click", (e) => { if (e.target === importBackdrop) closeImportSheet(); });
+
+  importConfirmBtn.addEventListener("click", () => {
+    const result = importParseResult;
+    if (!result || result.headerError || result.validRows.length === 0) return;
+
+    result.newExpenseCategories.forEach(v => addListValue("expenseCategories", v));
+    result.newIncomeCategories.forEach(v => addListValue("incomeCategories", v));
+    result.newPaymentMethods.forEach(v => addListValue("paymentMethods", v));
+
+    // Two passes: create every transaction first (so every potential "bill"
+    // row has an id), then resolve Reconciled With links against them.
+    const lookup = new Map();
+    const created = result.validRows.map(({ tx, reconciledWithRaw }) => {
+      const newTx = { id: uid(), ...tx };
+      transactions.push(newTx);
+      lookup.set(tx.date + " — " + tx.note, newTx.id);
+      return { newTx, reconciledWithRaw };
+    });
+    created.forEach(({ newTx, reconciledWithRaw }) => {
+      if (reconciledWithRaw && lookup.has(reconciledWithRaw)) newTx.reconciledBillId = lookup.get(reconciledWithRaw);
+    });
+
+    saveTransactions();
+    saveLists();
+    renderAllListEditors();
+    closeImportSheet();
+    renderAll();
+  });
+
   // ---------- Theme ----------
   function resolvedIsDark(theme) {
     if (theme === "dark") return true;
