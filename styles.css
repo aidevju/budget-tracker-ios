@@ -861,6 +861,28 @@ h1, h2 { margin: 0; font-weight: 600; }
   margin-bottom: 16px;
 }
 
+.settings-group-data {
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+  margin-top: 4px;
+}
+.settings-actions {
+  display: flex;
+  gap: 10px;
+}
+.btn-subtle, .btn-danger-subtle {
+  background: none;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+}
+.btn-subtle { color: var(--ink-soft); }
+.btn-danger-subtle { color: var(--expense); border-color: var(--expense); }
+
 /* Import CSV sheet */
 .import-summary-line {
   font-size: 14px;

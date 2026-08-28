@@ -168,12 +168,6 @@
     </label>
 
     <div class="settings-group">
-      <span class="settings-label">Data</span>
-      <button type="button" class="link-btn" id="importBtn">Import CSV</button>
-      <input type="file" id="importFileInput" accept=".csv" hidden>
-    </div>
-
-    <div class="settings-group">
       <button type="button" class="settings-label collapsible-toggle" id="expenseCategoryToggle" aria-expanded="false">
         <span>Expense categories</span>
         <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
@@ -197,6 +191,15 @@
       <div class="list-editor" id="paymentMethodListMgmt" hidden></div>
     </div>
     <p class="settings-caption">Renaming a value updates existing transactions automatically. A value in use by any transaction can't be deleted.</p>
+
+    <div class="settings-group settings-group-data">
+      <span class="settings-label">Data</span>
+      <div class="settings-actions">
+        <button type="button" class="btn-subtle" id="importBtn">Import CSV</button>
+        <input type="file" id="importFileInput" accept=".csv" hidden>
+        <button type="button" class="btn-danger-subtle" id="clearEntriesBtn">Clear Entries</button>
+      </div>
+    </div>
   </div>
 
 </div>
@@ -447,6 +450,39 @@
       <div class="sheet-actions-right">
         <button type="button" class="btn-secondary" id="importCancelBtn">Cancel</button>
         <button type="button" class="btn-primary" id="importConfirmBtn">Import</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Clear Entries sheet: bulk-delete transactions, all or from the last N days -->
+<div class="sheet-backdrop" id="clearEntriesSheetBackdrop">
+  <div class="sheet" id="clearEntriesSheet" role="dialog" aria-modal="true" aria-labelledby="clearEntriesSheetTitle">
+    <div class="sheet-handle"></div>
+    <h2 id="clearEntriesSheetTitle">Clear Entries</h2>
+
+    <p class="import-caption">Back up first — use Export CSV on the Month screen before clearing entries. This can't be undone.</p>
+
+    <div class="type-toggle" id="clearEntriesModeToggle">
+      <button type="button" class="type-btn active" data-mode="all">All entries</button>
+      <button type="button" class="type-btn" data-mode="days">Last N days</button>
+    </div>
+
+    <label class="field" id="clearEntriesDaysField" hidden>
+      <span>Number of days</span>
+      <input type="number" id="clearEntriesDaysInput" inputmode="numeric" min="1" step="1" placeholder="e.g. 30">
+    </label>
+
+    <p class="import-summary-line" id="clearEntriesCount"></p>
+
+    <p class="form-error" id="clearEntriesError" hidden></p>
+
+    <p class="import-summary-line" id="clearEntriesConfirmMessage" hidden></p>
+
+    <div class="sheet-actions">
+      <div class="sheet-actions-right">
+        <button type="button" class="btn-secondary" id="clearEntriesCancelBtn">Cancel</button>
+        <button type="button" class="btn-text" id="clearEntriesConfirmBtn">Clear</button>
       </div>
     </div>
   </div>
