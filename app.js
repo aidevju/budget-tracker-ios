@@ -522,23 +522,69 @@
     ).sort((a, b) => a.date.localeCompare(b.date));
   }
 
+  function hasAnyBillPayment() {
+    return transactions.some(t => t.category === "Bills" && t.subcategory === "Credit Card");
+  }
+
   function renderCreditCardsPanel() {
     const card = document.getElementById("ccCard");
     const rows = unbilledTotalsByAccount();
-    if (rows.length === 0) {
+    if (rows.length === 0 && !hasAnyBillPayment()) {
       card.hidden = true;
       return;
     }
     card.hidden = false;
-    document.getElementById("ccList").innerHTML = rows.map(([account, total]) => `
+    document.getElementById("ccList").innerHTML = rows.length > 0 ? rows.map(([account, total]) => `
       <div class="cc-row">
         <span class="cc-account">${escapeHtml(account || "Unspecified card")}</span>
         <span class="cc-balance mono">${formatMoney(total)}</span>
         <button type="button" class="link-btn cc-pay-btn" data-account="${escapeHtml(account)}">Pay Bill</button>
       </div>
-    `).join("");
+    `).join("") : `<p class="cc-empty">No unbilled charges right now.</p>`;
     document.querySelectorAll(".cc-pay-btn").forEach(btn => {
       btn.addEventListener("click", () => openBillSheet(btn.dataset.account));
+    });
+  }
+
+  function renderBillHistoryScreen() {
+    const bills = transactions
+      .filter(t => t.category === "Bills" && t.subcategory === "Credit Card")
+      .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
+
+    const listEl = document.getElementById("billHistoryList");
+    document.getElementById("billHistoryEmpty").hidden = bills.length > 0;
+
+    listEl.innerHTML = bills.map(bill => {
+      const linked = transactions.filter(t => t.reconciledBillId === bill.id);
+      return `
+        <div class="bill-history-item">
+          <button type="button" class="bill-history-row" data-id="${bill.id}">
+            <span class="bill-candidate-main">
+              <span class="bill-candidate-date">${bill.date}</span>
+              <span class="bill-candidate-note">${escapeHtml(bill.note || "Credit Card Bill")}</span>
+            </span>
+            <span class="bill-history-meta">
+              <span class="bill-candidate-amount mono">${formatMoney(bill.amount)}</span>
+              <span class="bill-history-count" aria-label="${linked.length} charge${linked.length === 1 ? "" : "s"}">
+                <svg class="count-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="3" width="12" height="15" rx="2"/><path d="M4 8v11a2 2 0 0 0 2 2h11"/></svg>
+                ${linked.length}
+              </span>
+            </span>
+            <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+          <div class="linked-charges-list" hidden>
+            ${linked.length > 0 ? renderChargeRows(linked) : `<p class="bill-history-none">No charges linked to this payment.</p>`}
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    listEl.querySelectorAll(".bill-history-row").forEach(row => {
+      row.addEventListener("click", () => {
+        const details = row.nextElementSibling;
+        details.hidden = !details.hidden;
+        row.classList.toggle("open", !details.hidden);
+      });
     });
   }
 
@@ -635,6 +681,7 @@
   const SCREENS = {
     month: document.getElementById("monthScreen"),
     dashboard: document.getElementById("dashboardScreen"),
+    billHistory: document.getElementById("billHistoryScreen"),
     templates: document.getElementById("templatesScreen"),
     settings: document.getElementById("settingsScreen")
   };
@@ -648,6 +695,7 @@
     addBtn.hidden = name !== "month";
     document.querySelectorAll(".tab").forEach(tab => tab.classList.toggle("active", tab.dataset.screen === name));
     if (name === "dashboard") renderDashboardScreen();
+    if (name === "billHistory") renderBillHistoryScreen();
     if (name === "templates") renderTemplatesScreen();
     if (name === "settings") syncSettingsUI();
   }
@@ -655,6 +703,8 @@
   document.querySelectorAll(".tab").forEach(tab => {
     tab.addEventListener("click", () => showScreen(tab.dataset.screen));
   });
+  document.getElementById("viewBillHistoryBtn").addEventListener("click", () => showScreen("billHistory"));
+  document.getElementById("billHistoryBackBtn").addEventListener("click", () => showScreen("dashboard"));
   goToTodayBtn.addEventListener("click", () => {
     viewYear = today.getFullYear();
     viewMonth = today.getMonth();
