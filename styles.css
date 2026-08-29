@@ -950,6 +950,39 @@ h1, h2 { margin: 0; font-weight: 600; }
 .btn-secondary { background: var(--paper); color: var(--ink); }
 .btn-text { background: none; color: var(--expense); padding-left: 0; }
 
+/* Toast notifications */
+.toast-container {
+  position: fixed;
+  left: 50%;
+  bottom: calc(64px + env(safe-area-inset-bottom) + 14px);
+  transform: translateX(-50%);
+  width: calc(100% - 40px);
+  max-width: 440px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  z-index: 50;
+  pointer-events: none;
+}
+.toast {
+  background: var(--ink);
+  color: var(--paper-raised);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 10px 16px;
+  border-radius: 999px;
+  box-shadow: 0 4px 14px rgba(32,38,44,0.25);
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  max-width: 100%;
+  text-align: center;
+}
+.toast.show { opacity: 1; transform: translateY(0); }
+.toast.error { background: var(--expense); }
+
 @media (prefers-reduced-motion: reduce) {
   .sheet, .sheet-backdrop { transition: none; }
+  .toast { transition: none; }
 }

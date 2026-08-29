@@ -41,6 +41,20 @@
 
   const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
+  // ---------- Toasts ----------
+  const toastContainer = document.getElementById("toastContainer");
+  function showToast(message, type = "success") {
+    const toast = document.createElement("div");
+    toast.className = `toast ${type}`;
+    toast.textContent = message;
+    toastContainer.appendChild(toast);
+    requestAnimationFrame(() => toast.classList.add("show"));
+    setTimeout(() => {
+      toast.classList.remove("show");
+      toast.addEventListener("transitionend", () => toast.remove(), { once: true });
+    }, 2500);
+  }
+
   // ---------- State ----------
   let transactions = loadTransactions();
   let settings = loadSettings();
@@ -71,8 +85,11 @@
   function saveTransactions() {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(transactions));
+      return true;
     } catch (e) {
       console.error("Failed to save transactions", e);
+      showToast("Couldn't save — storage may be full.", "error");
+      return false;
     }
   }
 
@@ -89,8 +106,11 @@
   function saveSettings() {
     try {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+      return true;
     } catch (e) {
       console.error("Failed to save settings", e);
+      showToast("Couldn't save settings.", "error");
+      return false;
     }
   }
 
@@ -113,8 +133,11 @@
   function saveLists() {
     try {
       localStorage.setItem(LISTS_KEY, JSON.stringify(lists));
+      return true;
     } catch (e) {
       console.error("Failed to save lists", e);
+      showToast("Couldn't save changes.", "error");
+      return false;
     }
   }
 
@@ -131,8 +154,11 @@
   function saveTemplates() {
     try {
       localStorage.setItem(TEMPLATES_KEY, JSON.stringify(templates));
+      return true;
     } catch (e) {
       console.error("Failed to save templates", e);
+      showToast("Couldn't save template.", "error");
+      return false;
     }
   }
 
@@ -396,6 +422,7 @@
     a.click();
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast("CSV exported");
   }
 
   // Expense category -> chart color. Slots 0-8 use the curated --cat-1..9
@@ -957,6 +984,7 @@
       return;
     }
 
+    const isEdit = !!editingId;
     if (editingId) {
       const tx = transactions.find(t => t.id === editingId);
       Object.assign(tx, { type: currentType, amount, category, subcategory, note: noteInput.value.trim(), date, paymentMethod, account });
@@ -973,7 +1001,7 @@
         account
       });
     }
-    saveTransactions();
+    const saved = saveTransactions();
     closeSheet();
 
     // Jump the visible month to the transaction's date so the user sees it.
@@ -981,6 +1009,7 @@
     viewYear = d.getFullYear();
     viewMonth = d.getMonth();
     renderAll();
+    if (saved) showToast(isEdit ? "Transaction updated" : "Transaction added");
   });
 
   deleteBtn.addEventListener("click", () => {
@@ -989,9 +1018,10 @@
     // dangling reconciledBillId references — they become unbilled again.
     transactions.forEach(t => { if (t.reconciledBillId === editingId) delete t.reconciledBillId; });
     transactions = transactions.filter(t => t.id !== editingId);
-    saveTransactions();
+    const saved = saveTransactions();
     closeSheet();
     renderAll();
+    if (saved) showToast("Transaction deleted");
   });
 
   // ---------- Pay Card Bill sheet ----------
@@ -1134,9 +1164,10 @@
     };
     transactions.push(newTx);
     transactions.forEach(t => { if (billCheckedIds.has(t.id)) t.reconciledBillId = newTx.id; });
-    saveTransactions();
+    const saved = saveTransactions();
     closeBillSheet();
     renderAll();
+    if (saved) showToast("Bill payment recorded");
   });
 
   // ---------- Template sheet ----------
@@ -1230,25 +1261,28 @@
       amount = parsed;
     }
 
+    const isEdit = !!editingTemplateId;
     if (editingTemplateId) {
       const t = templates.find(tpl => tpl.id === editingTemplateId);
       Object.assign(t, { type: templateType, category, subcategory, paymentMethod, account, note, amount });
     } else {
       templates.push({ id: uid(), type: templateType, category, subcategory, paymentMethod, account, note, amount });
     }
-    saveTemplates();
+    const saved = saveTemplates();
     closeTemplateSheet();
     renderTemplatesScreen();
     populateTemplatePicker();
+    if (saved) showToast(isEdit ? "Template updated" : "Template saved");
   });
 
   templateDeleteBtn.addEventListener("click", () => {
     if (!editingTemplateId) return;
     templates = templates.filter(t => t.id !== editingTemplateId);
-    saveTemplates();
+    const saved = saveTemplates();
     closeTemplateSheet();
     renderTemplatesScreen();
     populateTemplatePicker();
+    if (saved) showToast("Template deleted");
   });
 
   // ---------- Import CSV ----------
@@ -1556,11 +1590,13 @@
       if (reconciledWithRaw && lookup.has(reconciledWithRaw)) newTx.reconciledBillId = lookup.get(reconciledWithRaw);
     });
 
-    saveTransactions();
-    saveLists();
+    const savedTx = saveTransactions();
+    const savedLists = saveLists();
+    const count = created.length;
     renderAllListEditors();
     closeImportSheet();
     renderAll();
+    if (savedTx && savedLists) showToast(`Imported ${count} transaction${count === 1 ? "" : "s"}`);
   });
 
   // ---------- Clear Entries ----------
@@ -1650,10 +1686,12 @@
   clearEntriesConfirmBtn.addEventListener("click", () => {
     if (clearEntriesPending) {
       const idsToDelete = new Set(clearEntriesPending.map(t => t.id));
+      const count = clearEntriesPending.length;
       transactions = transactions.filter(t => !idsToDelete.has(t.id));
-      saveTransactions();
+      const saved = saveTransactions();
       closeClearEntriesSheet();
       renderAll();
+      if (saved) showToast(`${count} entr${count === 1 ? "y" : "ies"} deleted`);
       return;
     }
 
