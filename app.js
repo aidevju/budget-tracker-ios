@@ -1709,11 +1709,15 @@
       return;
     }
 
-    const linkedCount = candidates.filter(isTransactionLinked).length;
-    if (linkedCount > 0) {
-      clearEntriesError.textContent = `Can't clear — ${linkedCount} of these ${linkedCount === 1 ? "entry is" : "entries are"} linked to a credit card bill payment. Unlink or reconcile ${linkedCount === 1 ? "it" : "them"} individually first.`;
-      clearEntriesError.hidden = false;
-      return;
+    // "all" wipes every transaction, so no link between two deleted entries
+    // can be left dangling — skip the linkage check in that mode only.
+    if (clearEntriesMode !== "all") {
+      const linkedCount = candidates.filter(isTransactionLinked).length;
+      if (linkedCount > 0) {
+        clearEntriesError.textContent = `Can't clear — ${linkedCount} of these ${linkedCount === 1 ? "entry is" : "entries are"} linked to a credit card bill payment. Unlink or reconcile ${linkedCount === 1 ? "it" : "them"} individually first.`;
+        clearEntriesError.hidden = false;
+        return;
+      }
     }
 
     clearEntriesPending = candidates;
