@@ -68,6 +68,7 @@
   let currentBillAccount = null; // account key ("" = Unspecified card) the Pay Card Bill sheet is open for
   let billShowOlder = false;
   let billCheckedIds = new Set(); // ids of candidate charges currently checked in the Pay Card Bill sheet
+  let pendingBillReturn = null; // saved Pay Card Bill sheet state while the add-transaction sheet is open for a forgotten charge
   let editingTemplateId = null; // null = adding new
   let templateType = "expense"; // independent from currentType — the template sheet has its own type toggle
 
@@ -885,7 +886,7 @@
     `).join("");
   }
 
-  function openSheet(mode, id) {
+  function openSheet(mode, id, prefill) {
     formError.hidden = true;
     templatePickerField.hidden = mode !== "add";
     if (mode === "edit") {
@@ -919,10 +920,10 @@
       templatePickerInput.value = "";
       amountInput.value = "";
       subcategoryInput.value = "";
-      paymentMethodInput.value = "Cash";
-      accountInput.value = "";
+      paymentMethodInput.value = (prefill && prefill.paymentMethod) || "Cash";
+      accountInput.value = (prefill && prefill.account) || "";
       noteInput.value = "";
-      dateInput.value = todayISO();
+      dateInput.value = (prefill && prefill.date) || todayISO();
       deleteBtn.hidden = true;
       linkedChargesSection.hidden = true;
     }
@@ -935,8 +936,16 @@
   }
 
   addBtn.addEventListener("click", () => openSheet("add"));
-  document.getElementById("cancelBtn").addEventListener("click", closeSheet);
-  backdrop.addEventListener("click", (e) => { if (e.target === backdrop) closeSheet(); });
+  document.getElementById("cancelBtn").addEventListener("click", () => {
+    closeSheet();
+    resumeBillSheetIfPending();
+  });
+  backdrop.addEventListener("click", (e) => {
+    if (e.target === backdrop) {
+      closeSheet();
+      resumeBillSheetIfPending();
+    }
+  });
 
   linkedChargesToggle.addEventListener("click", () => {
     linkedChargesList.hidden = !linkedChargesList.hidden;
@@ -985,12 +994,14 @@
     }
 
     const isEdit = !!editingId;
+    let newTxId = null;
     if (editingId) {
       const tx = transactions.find(t => t.id === editingId);
       Object.assign(tx, { type: currentType, amount, category, subcategory, note: noteInput.value.trim(), date, paymentMethod, account });
     } else {
+      newTxId = uid();
       transactions.push({
-        id: uid(),
+        id: newTxId,
         type: currentType,
         amount,
         category,
@@ -1010,6 +1021,7 @@
     viewMonth = d.getMonth();
     renderAll();
     if (saved) showToast(isEdit ? "Transaction updated" : "Transaction added");
+    resumeBillSheetIfPending(newTxId);
   });
 
   deleteBtn.addEventListener("click", () => {
@@ -1040,6 +1052,7 @@
   const billShowOlderToggle = document.getElementById("billShowOlderToggle");
   const billFormError = document.getElementById("billFormError");
   const billCancelBtn = document.getElementById("billCancelBtn");
+  const billAddChargeBtn = document.getElementById("billAddChargeBtn");
 
   setupAutosuggest(billPaidAccountInput, document.getElementById("billPaidAccountSuggestions"), "account");
 
@@ -1072,6 +1085,50 @@
   function closeBillSheet() {
     billBackdrop.classList.remove("open");
   }
+
+  // Reopens the Pay Card Bill sheet after a detour through the add-transaction
+  // sheet to log a charge that wasn't recorded yet. Restores the in-progress
+  // bill form exactly as the user left it, and — when a new charge was just
+  // created — checks it off automatically since it now qualifies as unbilled.
+  function resumeBillSheetIfPending(newChargeId) {
+    if (!pendingBillReturn) return false;
+    const state = pendingBillReturn;
+    pendingBillReturn = null;
+
+    currentBillAccount = state.account;
+    billShowOlder = state.showOlder;
+    billShowOlderToggle.textContent = billShowOlder ? "Hide older charges" : "Show older charges";
+    billFormError.hidden = true;
+    billSheetTitle.textContent = state.account ? `Pay Bill — ${state.account}` : "Pay Bill — Unspecified card";
+    billDateInput.value = state.date;
+    billAmountInput.value = state.amount;
+    billPaymentMethodInput.value = state.paymentMethod;
+    billPaidAccountInput.value = state.paidAccount;
+    billCheckedIds = state.checkedIds;
+    if (newChargeId) billCheckedIds.add(newChargeId);
+
+    renderBillCandidates();
+    billBackdrop.classList.add("open");
+    return true;
+  }
+
+  billAddChargeBtn.addEventListener("click", () => {
+    pendingBillReturn = {
+      account: currentBillAccount,
+      date: billDateInput.value,
+      amount: billAmountInput.value,
+      paymentMethod: billPaymentMethodInput.value,
+      paidAccount: billPaidAccountInput.value,
+      checkedIds: new Set(billCheckedIds),
+      showOlder: billShowOlder
+    };
+    closeBillSheet();
+    openSheet("add", null, {
+      account: currentBillAccount,
+      paymentMethod: "Credit Card",
+      date: billDateInput.value || todayISO()
+    });
+  });
 
   function renderBillCandidates() {
     const candidates = getCandidateCharges(currentBillAccount, billDateInput.value || todayISO(), billShowOlder);
