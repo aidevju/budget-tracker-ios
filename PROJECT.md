@@ -226,13 +226,14 @@ automatically within about a minute.
 
 **Important:** whenever any of `index.html`, `styles.css`, `app.js`,
 or `manifest.json`/icons change, bump `CACHE_NAME` in
-`service-worker.js`. Otherwise devices that already installed the app
-keep serving the old cached version indefinitely.
-
-Bump the version shown in Settings (the `.settings-version` line in
-`index.html`) on any user-visible change, following semver
-(`X.Y.Z`): patch for fixes, minor for new features, major for
-breaking/data-model changes.
+`service-worker.js` (e.g. `ledger-cache-v21` -> `ledger-cache-v22`).
+Otherwise devices that already installed the app keep serving the old
+cached version indefinitely. In the same commit, set `APP_VERSION` in
+`app.js` (shown in Settings as "Ledger vX.Y.Z", rendered into
+`#appVersionLabel` in `index.html`) so its patch number matches the
+new `CACHE_NAME` number — e.g. `ledger-cache-v22` -> `APP_VERSION =
+"1.0.22"`. Bump the minor/major segment instead of the patch for a
+new feature or breaking/data-model change.
 
 ## Conventions to keep
 

@@ -1,6 +1,11 @@
 (() => {
   "use strict";
 
+  // Patch number must match the number in service-worker.js's CACHE_NAME
+  // (e.g. "ledger-cache-v21" -> "1.0.21") — bump both together whenever
+  // CACHE_NAME is bumped.
+  const APP_VERSION = "1.0.21";
+
   const STORAGE_KEY = "ledger_transactions_v1";
   const SETTINGS_KEY = "ledger_settings_v1";
   const LISTS_KEY = "ledger_lists_v1";
@@ -2006,6 +2011,8 @@
   const currencySelect = document.getElementById("currencySelect");
   const targetInput = document.getElementById("targetInput");
   const ccWindowInput = document.getElementById("ccWindowInput");
+
+  document.getElementById("appVersionLabel").textContent = `Ledger v${APP_VERSION}`;
 
   function populateCurrencyOptions() {
     currencySelect.innerHTML = CURRENCIES.map(c => `<option value="${c.code}">${c.label}</option>`).join("");
