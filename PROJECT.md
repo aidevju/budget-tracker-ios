@@ -59,7 +59,8 @@ Apple Developer account, and no Mac required.
     delete, blocked while a value is still in use by either), each
     collapsed by default to keep the screen from being dominated by
     long lists. A full tab/screen, not a popup sheet, for consistency
-    with the other tabs.
+    with the other tabs. A version number ("Ledger vX.Y.Z") is shown
+    at the bottom of the screen, hardcoded in `index.html`.
 - The floating "+" add-transaction button only shows on the Month
   tab (hidden on Dashboard/Credit Card Bills/Templates/Settings), positioned above the
   tab bar.
@@ -227,6 +228,11 @@ automatically within about a minute.
 or `manifest.json`/icons change, bump `CACHE_NAME` in
 `service-worker.js`. Otherwise devices that already installed the app
 keep serving the old cached version indefinitely.
+
+Bump the version shown in Settings (the `.settings-version` line in
+`index.html`) on any user-visible change, following semver
+(`X.Y.Z`): patch for fixes, minor for new features, major for
+breaking/data-model changes.
 
 ## Conventions to keep
 
