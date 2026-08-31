@@ -414,6 +414,7 @@ h1, h2 { margin: 0; font-weight: 600; }
   margin-bottom: 12px;
 }
 .list-header-row h2, .list-header-row h1 { margin-bottom: 0; }
+.list-header-actions { display: flex; align-items: baseline; gap: 14px; }
 .breakdown-list { display: flex; flex-direction: column; gap: 10px; }
 .breakdown-row {
   display: flex;
