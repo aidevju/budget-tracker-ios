@@ -134,7 +134,10 @@
   <div id="templatesScreen" hidden>
     <div class="list-header-row">
       <h1 class="screen-title">Templates</h1>
-      <button type="button" class="link-btn" id="addTemplateBtn">+ Add</button>
+      <div class="list-header-actions">
+        <button type="button" class="link-btn" id="exportTemplatesBtn">Export CSV</button>
+        <button type="button" class="link-btn" id="addTemplateBtn">+ Add</button>
+      </div>
     </div>
     <div id="templateList" class="tx-list"></div>
   </div>
@@ -197,6 +200,8 @@
       <div class="settings-actions">
         <button type="button" class="btn-subtle" id="importBtn">Import CSV</button>
         <input type="file" id="importFileInput" accept=".csv" hidden>
+        <button type="button" class="btn-subtle" id="importTemplatesBtn">Import Templates</button>
+        <input type="file" id="importTemplatesFileInput" accept=".csv" hidden>
         <button type="button" class="btn-danger-subtle" id="clearEntriesBtn">Clear Entries</button>
       </div>
     </div>
@@ -450,6 +455,44 @@
       <div class="sheet-actions-right">
         <button type="button" class="btn-secondary" id="importCancelBtn">Cancel</button>
         <button type="button" class="btn-primary" id="importConfirmBtn">Import</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Import Templates CSV sheet: preview + confirm before committing parsed rows -->
+<div class="sheet-backdrop" id="templateImportSheetBackdrop">
+  <div class="sheet" id="templateImportSheet" role="dialog" aria-modal="true" aria-labelledby="templateImportSheetTitle">
+    <div class="sheet-handle"></div>
+    <h2 id="templateImportSheetTitle">Import Templates</h2>
+
+    <p class="form-error" id="templateImportError" hidden></p>
+
+    <div id="templateImportSummaryBody">
+      <p class="import-summary-line" id="templateImportRowSummary"></p>
+
+      <div class="import-block" id="templateImportRejectedBlock" hidden>
+        <span class="import-block-label">Rows skipped</span>
+        <ul class="import-error-list" id="templateImportErrorList"></ul>
+      </div>
+
+      <div class="import-block" id="templateImportNewValuesBlock" hidden>
+        <span class="import-block-label">New values to add</span>
+        <ul class="import-new-values-list" id="templateImportNewValuesList"></ul>
+      </div>
+
+      <div class="import-totals" id="templateImportTotals">
+        <div class="import-totals-row"><span>Expense templates</span><span id="templateImportExpenseCount" class="mono">0</span></div>
+        <div class="import-totals-row"><span>Income templates</span><span id="templateImportIncomeCount" class="mono">0</span></div>
+      </div>
+
+      <p class="import-caption">Importing does not check for duplicates — importing the same file twice will create duplicate templates.</p>
+    </div>
+
+    <div class="sheet-actions">
+      <div class="sheet-actions-right">
+        <button type="button" class="btn-secondary" id="templateImportCancelBtn">Cancel</button>
+        <button type="button" class="btn-primary" id="templateImportConfirmBtn">Import</button>
       </div>
     </div>
   </div>

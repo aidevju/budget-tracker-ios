@@ -40,11 +40,20 @@ Apple Developer account, and no Mac required.
     floating "+" stays Month-only — not reused here); tapping a row
     edits it, with Delete inside that sheet. Applying a template from
     the transaction add sheet's picker is a one-time copy into a new,
-    independent transaction — there's no persistent link back.
+    independent transaction — there's no persistent link back. An
+    "Export CSV" header link (next to "+ Add") downloads all templates
+    as a CSV (Type, Category, Subcategory, Payment Method, Account,
+    Note, Amount — Amount blank when unset); the matching "Import
+    Templates" action lives in Settings (see below), since that's
+    where the transaction Import CSV action already lives.
   - **Settings**: theme (light / dark / system), a currency symbol
     picker (defaults to no symbol), an optional monthly expense
     target, the credit-card bill suggestion window (days), an
-    **Import CSV** action (see below), and an editable-lists section
+    **Import CSV** action (see below), an **Import Templates** action
+    (the counterpart to the Templates screen's "Export CSV" — same
+    preview-before-commit flow, but for the dateless template shape:
+    required columns are just Type and Category, Amount is optional),
+    and an editable-lists section
     for Expense Categories / Income Categories / Payment Methods (add,
     rename — cascades to existing transactions *and* templates — and
     delete, blocked while a value is still in use by either), each
@@ -78,9 +87,13 @@ Apple Developer account, and no Mac required.
   skipped, not fatal to the whole import; every rejected row and its
   reason is listed in a preview sheet before anything is written,
   alongside row counts, new list values, Reconciled With match counts,
-  income/expense totals, and the date range covered. No
-  de-duplication against existing transactions — importing the same
-  file twice creates duplicate rows.
+  income/expense totals, and the date range covered. Amount parsing
+  strips currency symbols and figures out which of "." and ","
+  is the decimal separator (the last one, when followed by 1-2
+  digits) rather than always treating "." as decimal and "," as
+  thousands — so a comma-decimal amount like "50,00" reads as 50.00,
+  not 5000. No de-duplication against existing transactions —
+  importing the same file twice creates duplicate rows.
 - Fully offline-capable once installed — a service worker caches the
   app shell, and all data lives in the browser's `localStorage` on
   the user's own device. No backend, no accounts, no network calls.
@@ -99,9 +112,10 @@ budget-tracker/
 ├── index.html          Page shell: Month/Dashboard/Templates/Settings
 │                        screens plus the bottom tab bar, the add/edit
 │                        transaction sheet, the Pay Card Bill sheet, the
-│                        add/edit template sheet, and the Import CSV
-│                        preview sheet (four modals now, same open/close
-│                        mechanics), the template picker inside the
+│                        add/edit template sheet, the Import CSV preview
+│                        sheet, and the Import Templates preview sheet
+│                        (five modals now, same open/close mechanics),
+│                        the template picker inside the
 │                        transaction sheet, plus a custom autosuggest
 │                        dropdown for subcategory/account. Screens are
 │                        plain hidden-attribute divs toggled in app.js —

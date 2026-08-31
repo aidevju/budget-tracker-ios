@@ -829,6 +829,36 @@
     });
   }
 
+  function exportTemplatesCSV() {
+    const lines = [csvRow(["Type", "Category", "Subcategory", "Payment Method", "Account", "Note", "Amount"])];
+    templates.forEach(t => {
+      lines.push(csvRow([
+        t.type === "income" ? "Income" : "Expense",
+        t.category,
+        t.subcategory || "",
+        t.paymentMethod || "Cash",
+        t.account || "",
+        t.note || "",
+        t.amount != null ? t.amount.toFixed(2) : ""
+      ]));
+    });
+
+    // Leading BOM so Excel reads the UTF-8 currency symbols correctly.
+    const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "ledger_templates.csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast("Templates exported");
+  }
+
+  document.getElementById("exportTemplatesBtn").addEventListener("click", exportTemplatesCSV);
+
   // ---------- Sheet (add/edit form) ----------
   const backdrop = document.getElementById("sheetBackdrop");
   const form = document.getElementById("txForm");
@@ -1333,10 +1363,10 @@
     return rows;
   }
 
-  function buildImportHeaderIndex(headerRow) {
+  function buildImportHeaderIndex(headerRow, columnMap = IMPORT_COLUMN_MAP) {
     const index = {};
     headerRow.forEach((h, i) => {
-      const key = IMPORT_COLUMN_MAP[h.trim().toLowerCase()];
+      const key = columnMap[h.trim().toLowerCase()];
       if (key) index[key] = i;
     });
     return index;
@@ -1357,10 +1387,28 @@
     return dt.getFullYear() === y && dt.getMonth() === mo - 1 && dt.getDate() === d;
   }
 
+  // Strips currency symbols/spaces, then figures out which of "." and ","
+  // is the decimal separator rather than assuming "." always is: the last
+  // one to appear, when followed by 1-2 digits, is the decimal point and
+  // the other is a thousands separator to discard. Without this, a
+  // comma-decimal amount like "50,00" (50.00 in many locales) was read as
+  // "5000" — commas were always stripped as if they were thousands
+  // separators, inflating totals by 100x.
   function parseImportAmount(raw) {
     if (!raw) return NaN;
-    const cleaned = raw.replace(/[^0-9.\-]/g, "");
+    let cleaned = raw.replace(/[^0-9.,\-]/g, "");
     if (!cleaned) return NaN;
+
+    const lastSep = Math.max(cleaned.lastIndexOf(","), cleaned.lastIndexOf("."));
+    if (lastSep !== -1) {
+      const fractionDigits = cleaned.length - lastSep - 1;
+      if (fractionDigits >= 1 && fractionDigits <= 2) {
+        cleaned = cleaned.slice(0, lastSep).replace(/[.,]/g, "") + "." + cleaned.slice(lastSep + 1);
+      } else {
+        cleaned = cleaned.replace(/[.,]/g, "");
+      }
+    }
+    if (!cleaned || cleaned === "-") return NaN;
     return parseFloat(cleaned);
   }
 
@@ -1597,6 +1645,205 @@
     closeImportSheet();
     renderAll();
     if (savedTx && savedLists) showToast(`Imported ${count} transaction${count === 1 ? "" : "s"}`);
+  });
+
+  // ---------- Import Templates CSV ----------
+  // Mirrors the transaction Import CSV above (parseCSV, header-by-name
+  // matching, row-level validation with a preview before committing) but
+  // for the flat, dateless ledger_templates_v1 shape — no Date/Reconciled
+  // With columns, and Amount is optional (blank means null, same as the
+  // template add/edit sheet).
+  const TEMPLATE_IMPORT_COLUMN_MAP = {
+    "type": "type",
+    "category": "category",
+    "subcategory": "subcategory",
+    "payment method": "paymentMethod",
+    "account": "account",
+    "note": "note",
+    "amount": "amount"
+  };
+
+  function hasRequiredTemplateColumns(headerIndex) {
+    return headerIndex.type !== undefined && headerIndex.category !== undefined;
+  }
+
+  // Amount is never rejected as "missing" here (blank is valid — a
+  // template with no amount just leaves it for the user to fill in when
+  // applied) but an unparseable/non-positive non-blank value is.
+  function parseTemplateImportRow(headerIndex, rawRow) {
+    const typeRaw = importCell(rawRow, headerIndex, "type").toLowerCase();
+    if (typeRaw !== "income" && typeRaw !== "expense") return { ok: false, reason: "Type must be Income or Expense" };
+
+    const category = importCell(rawRow, headerIndex, "category");
+    if (!category) return { ok: false, reason: "Missing Category" };
+
+    const amountRaw = importCell(rawRow, headerIndex, "amount");
+    let amount = null;
+    if (amountRaw) {
+      amount = parseImportAmount(amountRaw);
+      if (isNaN(amount) || amount <= 0) return { ok: false, reason: "Amount must be greater than 0, or left blank" };
+    }
+
+    return {
+      ok: true,
+      tpl: {
+        type: typeRaw,
+        category,
+        subcategory: importCell(rawRow, headerIndex, "subcategory"),
+        paymentMethod: importCell(rawRow, headerIndex, "paymentMethod") || "Cash",
+        account: importCell(rawRow, headerIndex, "account"),
+        note: importCell(rawRow, headerIndex, "note"),
+        amount
+      }
+    };
+  }
+
+  function buildTemplateImportPreview(text) {
+    const rows = parseCSV(text).filter(r => r.some(c => c.trim() !== ""));
+    if (rows.length === 0) return { headerError: "The file appears to be empty." };
+
+    let headerRowIdx = -1, headerIndex = null;
+    for (let i = 0; i < rows.length; i++) {
+      const candidate = buildImportHeaderIndex(rows[i], TEMPLATE_IMPORT_COLUMN_MAP);
+      if (hasRequiredTemplateColumns(candidate)) { headerRowIdx = i; headerIndex = candidate; break; }
+    }
+    if (headerRowIdx === -1) {
+      return { headerError: "The file is missing one or more required columns (Type, Category)." };
+    }
+
+    const validRows = [], rejectedRows = [];
+    rows.slice(headerRowIdx + 1).forEach(raw => {
+      const result = parseTemplateImportRow(headerIndex, raw);
+      if (result.ok) validRows.push(result);
+      else rejectedRows.push({ row: raw, reason: result.reason });
+    });
+
+    const seenExpense = new Set(lists.expenseCategories);
+    const seenIncome = new Set(lists.incomeCategories);
+    const seenPM = new Set(lists.paymentMethods);
+    const newExpenseCategories = [], newIncomeCategories = [], newPaymentMethods = [];
+    validRows.forEach(({ tpl }) => {
+      if (tpl.type === "expense") {
+        if (!seenExpense.has(tpl.category) && !newExpenseCategories.includes(tpl.category)) newExpenseCategories.push(tpl.category);
+      } else if (!seenIncome.has(tpl.category) && !newIncomeCategories.includes(tpl.category)) {
+        newIncomeCategories.push(tpl.category);
+      }
+      if (tpl.paymentMethod && !seenPM.has(tpl.paymentMethod) && !newPaymentMethods.includes(tpl.paymentMethod)) {
+        newPaymentMethods.push(tpl.paymentMethod);
+      }
+    });
+
+    const expenseCount = validRows.filter(({ tpl }) => tpl.type === "expense").length;
+    const incomeCount = validRows.filter(({ tpl }) => tpl.type === "income").length;
+
+    return { validRows, rejectedRows, newExpenseCategories, newIncomeCategories, newPaymentMethods, expenseCount, incomeCount };
+  }
+
+  const templateImportBackdrop = document.getElementById("templateImportSheetBackdrop");
+  const importTemplatesBtn = document.getElementById("importTemplatesBtn");
+  const importTemplatesFileInput = document.getElementById("importTemplatesFileInput");
+  const templateImportError = document.getElementById("templateImportError");
+  const templateImportSummaryBody = document.getElementById("templateImportSummaryBody");
+  const templateImportRowSummary = document.getElementById("templateImportRowSummary");
+  const templateImportRejectedBlock = document.getElementById("templateImportRejectedBlock");
+  const templateImportErrorList = document.getElementById("templateImportErrorList");
+  const templateImportNewValuesBlock = document.getElementById("templateImportNewValuesBlock");
+  const templateImportNewValuesList = document.getElementById("templateImportNewValuesList");
+  const templateImportExpenseCount = document.getElementById("templateImportExpenseCount");
+  const templateImportIncomeCount = document.getElementById("templateImportIncomeCount");
+  const templateImportCancelBtn = document.getElementById("templateImportCancelBtn");
+  const templateImportConfirmBtn = document.getElementById("templateImportConfirmBtn");
+
+  let templateImportParseResult = null;
+
+  function renderTemplateImportPreview(result) {
+    if (result.headerError) {
+      templateImportError.hidden = false;
+      templateImportError.textContent = result.headerError;
+      templateImportSummaryBody.hidden = true;
+      templateImportConfirmBtn.disabled = true;
+      return;
+    }
+    templateImportError.hidden = true;
+    templateImportSummaryBody.hidden = false;
+
+    const total = result.validRows.length + result.rejectedRows.length;
+    templateImportRowSummary.textContent = `${result.validRows.length} of ${total} row${total === 1 ? "" : "s"} ready to import`;
+
+    if (result.rejectedRows.length > 0) {
+      templateImportRejectedBlock.hidden = false;
+      const shown = result.rejectedRows.slice(0, 10);
+      templateImportErrorList.innerHTML = shown.map(r => `<li>${escapeHtml(rejectedRowLabel(r.row))} — ${escapeHtml(r.reason)}</li>`).join("")
+        + (result.rejectedRows.length > shown.length ? `<li>…and ${result.rejectedRows.length - shown.length} more</li>` : "");
+    } else {
+      templateImportRejectedBlock.hidden = true;
+      templateImportErrorList.innerHTML = "";
+    }
+
+    const newValueLines = [];
+    if (result.newExpenseCategories.length) newValueLines.push(`Expense categor${result.newExpenseCategories.length === 1 ? "y" : "ies"}: ${result.newExpenseCategories.join(", ")}`);
+    if (result.newIncomeCategories.length) newValueLines.push(`Income categor${result.newIncomeCategories.length === 1 ? "y" : "ies"}: ${result.newIncomeCategories.join(", ")}`);
+    if (result.newPaymentMethods.length) newValueLines.push(`Payment method${result.newPaymentMethods.length === 1 ? "" : "s"}: ${result.newPaymentMethods.join(", ")}`);
+    if (newValueLines.length > 0) {
+      templateImportNewValuesBlock.hidden = false;
+      templateImportNewValuesList.innerHTML = newValueLines.map(l => `<li>${escapeHtml(l)}</li>`).join("");
+    } else {
+      templateImportNewValuesBlock.hidden = true;
+      templateImportNewValuesList.innerHTML = "";
+    }
+
+    templateImportExpenseCount.textContent = String(result.expenseCount);
+    templateImportIncomeCount.textContent = String(result.incomeCount);
+
+    templateImportConfirmBtn.disabled = result.validRows.length === 0;
+  }
+
+  function openTemplateImportSheet(text) {
+    templateImportParseResult = buildTemplateImportPreview(text);
+    renderTemplateImportPreview(templateImportParseResult);
+    templateImportBackdrop.classList.add("open");
+  }
+
+  function closeTemplateImportSheet() {
+    templateImportBackdrop.classList.remove("open");
+    templateImportParseResult = null;
+  }
+
+  importTemplatesBtn.addEventListener("click", () => importTemplatesFileInput.click());
+  importTemplatesFileInput.addEventListener("change", () => {
+    const file = importTemplatesFileInput.files[0];
+    importTemplatesFileInput.value = ""; // allow re-selecting the same file later
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => openTemplateImportSheet(reader.result);
+    reader.readAsText(file);
+  });
+
+  templateImportCancelBtn.addEventListener("click", closeTemplateImportSheet);
+  templateImportBackdrop.addEventListener("click", (e) => { if (e.target === templateImportBackdrop) closeTemplateImportSheet(); });
+
+  templateImportConfirmBtn.addEventListener("click", () => {
+    const result = templateImportParseResult;
+    if (!result || result.headerError || result.validRows.length === 0) return;
+
+    result.newExpenseCategories.forEach(v => addListValue("expenseCategories", v));
+    result.newIncomeCategories.forEach(v => addListValue("incomeCategories", v));
+    result.newPaymentMethods.forEach(v => addListValue("paymentMethods", v));
+
+    const created = result.validRows.map(({ tpl }) => {
+      const newTpl = { id: uid(), ...tpl };
+      templates.push(newTpl);
+      return newTpl;
+    });
+
+    const savedTpl = saveTemplates();
+    const savedLists = saveLists();
+    const count = created.length;
+    renderAllListEditors();
+    closeTemplateImportSheet();
+    renderTemplatesScreen();
+    populateTemplatePicker();
+    if (savedTpl && savedLists) showToast(`Imported ${count} template${count === 1 ? "" : "s"}`);
   });
 
   // ---------- Clear Entries ----------
