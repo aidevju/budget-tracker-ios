@@ -4,7 +4,7 @@
   // Minor number must match the number in service-worker.js's CACHE_NAME
   // (e.g. "ledger-cache-v21" -> "1.21") — bump both together whenever
   // CACHE_NAME is bumped.
-  const APP_VERSION = "1.21";
+  const APP_VERSION = "1.22";
 
   const STORAGE_KEY = "ledger_transactions_v1";
   const SETTINGS_KEY = "ledger_settings_v1";
