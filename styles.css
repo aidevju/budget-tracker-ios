@@ -220,6 +220,71 @@ h1, h2 { margin: 0; font-weight: 600; }
   color: var(--ink-soft);
 }
 
+/* Recurring monthly templates checklist (month screen) */
+.recurring-card {
+  background: var(--paper-raised);
+  border-radius: var(--radius-card);
+  padding: 16px 18px;
+  box-shadow: 0 1px 0 var(--line);
+  margin-bottom: 30px;
+}
+.recurring-card[hidden] { display: none; }
+.recurring-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 12px;
+}
+.recurring-label {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+.recurring-status-count { font-size: 13px; color: var(--ink-soft); }
+.recurring-list { display: flex; flex-direction: column; }
+.recurring-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  border-left: none;
+  border-right: none;
+  border-top: none;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+button.recurring-row:active { opacity: 0.6; }
+.recurring-row.done { cursor: default; }
+.recurring-list .recurring-row:last-child { border-bottom: none; }
+.recurring-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--line-strong);
+}
+.recurring-dot.done.expense { background: var(--expense); }
+.recurring-dot.done.income { background: var(--income); }
+.recurring-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+}
+.recurring-row.done .recurring-name { color: var(--ink-soft); }
+.recurring-status {
+  flex-shrink: 0;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+.recurring-row:not(.done) .recurring-status { color: var(--ink); font-weight: 500; }
+
 /* Dashboard screen */
 .insight-row {
   display: flex;
@@ -460,6 +525,13 @@ h1, h2 { margin: 0; font-weight: 600; }
 .tx-dot.income { background: var(--income); }
 .tx-main { flex: 1; min-width: 0; }
 .tx-category { font-size: 15px; font-weight: 500; }
+.recurring-badge {
+  width: 13px;
+  height: 13px;
+  margin-left: 5px;
+  vertical-align: -1px;
+  color: var(--ink-soft);
+}
 .tx-note { font-size: 13px; color: var(--ink-soft); margin-top: 1px; }
 .tx-amount { font-size: 15px; flex-shrink: 0; }
 .tx-amount.expense { color: var(--expense); }
@@ -641,6 +713,20 @@ h1, h2 { margin: 0; font-weight: 600; }
   outline-offset: 1px;
 }
 .field[hidden] { display: none; }
+.field-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+.field-checkbox input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  accent-color: var(--ink);
+}
 
 /* Custom autosuggest dropdown (subcategory / account) — plain <datalist>
    has poor/inconsistent support on iOS Safari, this app's install target */

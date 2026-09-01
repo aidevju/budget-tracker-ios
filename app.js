@@ -70,6 +70,7 @@
   let billCheckedIds = new Set(); // ids of candidate charges currently checked in the Pay Card Bill sheet
   let editingTemplateId = null; // null = adding new
   let templateType = "expense"; // independent from currentType — the template sheet has its own type toggle
+  let appliedTemplateId = null; // template the open add-transaction sheet was seeded from, for fromTemplateId tagging
 
   // ---------- Storage ----------
   function loadTransactions() {
@@ -523,6 +524,59 @@
     }
   }
 
+  // Recurring monthly templates checklist for the viewed month — a template
+  // counts as "added" for the month once some transaction in it carries a
+  // fromTemplateId pointing back to that template (set only when the
+  // transaction was created by applying that template, via this checklist
+  // or the picker in the add-transaction sheet).
+  function renderRecurringCard(monthTx) {
+    const card = document.getElementById("recurringCard");
+    const recurringTemplates = templates.filter(t => t.recurring);
+    if (recurringTemplates.length === 0) {
+      card.hidden = true;
+      return;
+    }
+    card.hidden = false;
+
+    const fulfilledIds = new Set(monthTx.filter(t => t.fromTemplateId).map(t => t.fromTemplateId));
+    const rows = recurringTemplates.map(t => ({ t, done: fulfilledIds.has(t.id) }));
+    const doneCount = rows.filter(r => r.done).length;
+    document.getElementById("recurringStatusCount").textContent = `${doneCount}/${rows.length} added`;
+
+    // Rows still needing input surface first.
+    rows.sort((a, b) => Number(a.done) - Number(b.done));
+
+    document.getElementById("recurringList").innerHTML = rows.map(({ t, done }) => {
+      if (done) {
+        return `
+          <div class="recurring-row done">
+            <span class="recurring-dot done ${t.type}"></span>
+            <span class="recurring-name">${escapeHtml(templateLabel(t))}</span>
+            <span class="recurring-status">Added</span>
+          </div>
+        `;
+      }
+      return `
+        <button type="button" class="recurring-row" data-id="${t.id}">
+          <span class="recurring-dot ${t.type}"></span>
+          <span class="recurring-name">${escapeHtml(templateLabel(t))}</span>
+          <span class="recurring-status">${t.amount != null ? formatMoney(t.amount) : "Needs input"}</span>
+        </button>
+      `;
+    }).join("");
+
+    document.getElementById("recurringList").querySelectorAll(".recurring-row:not(.done)").forEach(row => {
+      row.addEventListener("click", () => {
+        const t = templates.find(tpl => tpl.id === row.dataset.id);
+        if (!t) return;
+        openSheet("add");
+        applyTemplateToForm(t);
+        const isCurrentMonth = viewYear === today.getFullYear() && viewMonth === today.getMonth();
+        dateInput.value = isCurrentMonth ? todayISO() : `${viewYear}-${String(viewMonth + 1).padStart(2, "0")}-01`;
+      });
+    });
+  }
+
   // ---------- Credit-card bill reconciliation ----------
   function unbilledTotalsByAccount() {
     const totals = {};
@@ -721,6 +775,9 @@
     Object.entries(SCREENS).forEach(([key, el]) => { el.hidden = key !== name; });
     addBtn.hidden = name !== "month";
     document.querySelectorAll(".tab").forEach(tab => tab.classList.toggle("active", tab.dataset.screen === name));
+    // Templates (and their recurring flag) can change on the Templates
+    // screen, so refresh the checklist whenever Month becomes visible again.
+    if (name === "month") renderRecurringCard(getMonthTransactions());
     if (name === "dashboard") renderDashboardScreen();
     if (name === "billHistory") renderBillHistoryScreen();
     if (name === "templates") renderTemplatesScreen();
@@ -782,6 +839,7 @@
     const monthTx = getMonthTransactions();
     renderSummary(monthTx);
     renderTargetCard(monthTx);
+    renderRecurringCard(monthTx);
     renderBreakdown(monthTx);
     renderList(monthTx);
     if (currentScreen === "dashboard") renderDashboardScreen();
@@ -796,6 +854,8 @@
     return label;
   }
 
+  const RECURRING_ICON = `<svg class="recurring-badge" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-label="Recurs monthly"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>`;
+
   function renderTemplateRow(t) {
     const metaParts = [];
     if (t.note) metaParts.push(t.note);
@@ -809,7 +869,7 @@
       <button class="tx-row" data-id="${t.id}">
         <span class="tx-dot ${t.type}"></span>
         <span class="tx-main">
-          <span class="tx-category">${escapeHtml(t.category)}${t.subcategory ? " · " + escapeHtml(t.subcategory) : ""}</span>
+          <span class="tx-category">${escapeHtml(t.category)}${t.subcategory ? " · " + escapeHtml(t.subcategory) : ""}${t.recurring ? RECURRING_ICON : ""}</span>
           ${metaParts.length ? `<span class="tx-note">${escapeHtml(metaParts.join(" · "))}</span>` : ""}
         </span>
         <span class="${amountClass}">${amountText}</span>
@@ -830,7 +890,7 @@
   }
 
   function exportTemplatesCSV() {
-    const lines = [csvRow(["Type", "Category", "Subcategory", "Payment Method", "Account", "Note", "Amount"])];
+    const lines = [csvRow(["Type", "Category", "Subcategory", "Payment Method", "Account", "Note", "Amount", "Recurring"])];
     templates.forEach(t => {
       lines.push(csvRow([
         t.type === "income" ? "Income" : "Expense",
@@ -839,7 +899,8 @@
         t.paymentMethod || "Cash",
         t.account || "",
         t.note || "",
-        t.amount != null ? t.amount.toFixed(2) : ""
+        t.amount != null ? t.amount.toFixed(2) : "",
+        t.recurring ? "Yes" : ""
       ]));
     });
 
@@ -918,6 +979,7 @@
   function openSheet(mode, id) {
     formError.hidden = true;
     templatePickerField.hidden = mode !== "add";
+    appliedTemplateId = null;
     if (mode === "edit") {
       const tx = transactions.find(t => t.id === id);
       if (!tx) return;
@@ -977,18 +1039,28 @@
     if (btn) setType(btn.dataset.type);
   });
 
+  // Seeds the add-transaction form from a template's fields — shared by the
+  // in-sheet template picker and the Month tab's recurring checklist rows.
+  // Records which template this add is seeded from (appliedTemplateId) so a
+  // saved transaction can be tagged with fromTemplateId, letting the
+  // recurring checklist tell it's been fulfilled for the month — the only
+  // exception to templates otherwise leaving no persistent link back.
+  function applyTemplateToForm(t) {
+    setType(t.type);
+    categoryInput.value = t.category;
+    subcategoryInput.value = t.subcategory || "";
+    paymentMethodInput.value = t.paymentMethod || "Cash";
+    accountInput.value = t.account || "";
+    noteInput.value = t.note || "";
+    if (t.amount != null) amountInput.value = t.amount;
+    appliedTemplateId = t.id;
+  }
+
   templatePickerInput.addEventListener("change", () => {
     const id = templatePickerInput.value;
     if (!id) return;
     const t = templates.find(tpl => tpl.id === id);
-    if (t) {
-      categoryInput.value = t.category;
-      subcategoryInput.value = t.subcategory || "";
-      paymentMethodInput.value = t.paymentMethod || "Cash";
-      accountInput.value = t.account || "";
-      noteInput.value = t.note || "";
-      if (t.amount != null) amountInput.value = t.amount;
-    }
+    if (t) applyTemplateToForm(t);
     templatePickerInput.value = ""; // one-time apply — not a sticky/bound selection
   });
 
@@ -1028,7 +1100,8 @@
         note: noteInput.value.trim(),
         date,
         paymentMethod,
-        account
+        account,
+        ...(appliedTemplateId ? { fromTemplateId: appliedTemplateId } : {})
       });
     }
     const saved = saveTransactions();
@@ -1210,6 +1283,7 @@
   const templateAccountInput = document.getElementById("templateAccountInput");
   const templateNoteInput = document.getElementById("templateNoteInput");
   const templateAmountInput = document.getElementById("templateAmountInput");
+  const templateRecurringInput = document.getElementById("templateRecurringInput");
   const templateFormError = document.getElementById("templateFormError");
   const templateDeleteBtn = document.getElementById("templateDeleteBtn");
   const templateCancelBtn = document.getElementById("templateCancelBtn");
@@ -1243,6 +1317,7 @@
       templateAccountInput.value = t.account || "";
       templateNoteInput.value = t.note || "";
       templateAmountInput.value = t.amount != null ? t.amount : "";
+      templateRecurringInput.checked = !!t.recurring;
       templateDeleteBtn.hidden = false;
     } else {
       editingTemplateId = null;
@@ -1253,6 +1328,7 @@
       templateAccountInput.value = "";
       templateNoteInput.value = "";
       templateAmountInput.value = "";
+      templateRecurringInput.checked = false;
       templateDeleteBtn.hidden = true;
     }
     templateBackdrop.classList.add("open");
@@ -1290,13 +1366,14 @@
       }
       amount = parsed;
     }
+    const recurring = templateRecurringInput.checked;
 
     const isEdit = !!editingTemplateId;
     if (editingTemplateId) {
       const t = templates.find(tpl => tpl.id === editingTemplateId);
-      Object.assign(t, { type: templateType, category, subcategory, paymentMethod, account, note, amount });
+      Object.assign(t, { type: templateType, category, subcategory, paymentMethod, account, note, amount, recurring });
     } else {
-      templates.push({ id: uid(), type: templateType, category, subcategory, paymentMethod, account, note, amount });
+      templates.push({ id: uid(), type: templateType, category, subcategory, paymentMethod, account, note, amount, recurring });
     }
     const saved = saveTemplates();
     closeTemplateSheet();
@@ -1660,7 +1737,8 @@
     "payment method": "paymentMethod",
     "account": "account",
     "note": "note",
-    "amount": "amount"
+    "amount": "amount",
+    "recurring": "recurring"
   };
 
   function hasRequiredTemplateColumns(headerIndex) {
@@ -1684,6 +1762,9 @@
       if (isNaN(amount) || amount <= 0) return { ok: false, reason: "Amount must be greater than 0, or left blank" };
     }
 
+    const recurringRaw = importCell(rawRow, headerIndex, "recurring").trim().toLowerCase();
+    const recurring = recurringRaw === "yes" || recurringRaw === "true" || recurringRaw === "1";
+
     return {
       ok: true,
       tpl: {
@@ -1693,7 +1774,8 @@
         paymentMethod: importCell(rawRow, headerIndex, "paymentMethod") || "Cash",
         account: importCell(rawRow, headerIndex, "account"),
         note: importCell(rawRow, headerIndex, "note"),
-        amount
+        amount,
+        recurring
       }
     };
   }

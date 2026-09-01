@@ -63,6 +63,15 @@
       <div class="target-status" id="targetStatus"></div>
     </div>
 
+    <!-- Recurring monthly templates checklist for the viewed month -->
+    <div class="recurring-card" id="recurringCard" hidden>
+      <div class="recurring-header">
+        <span class="recurring-label">Recurring</span>
+        <span class="recurring-status-count mono" id="recurringStatusCount"></span>
+      </div>
+      <div class="recurring-list" id="recurringList"></div>
+    </div>
+
     <!-- Category breakdown -->
     <section class="breakdown" id="breakdown" hidden>
       <h2>By category</h2>
@@ -404,6 +413,11 @@
       <label class="field">
         <span>Amount (optional)</span>
         <input type="number" id="templateAmountInput" inputmode="decimal" step="0.01" min="0" placeholder="Leave blank to fill in later">
+      </label>
+
+      <label class="field-checkbox">
+        <input type="checkbox" id="templateRecurringInput">
+        <span>Recurs monthly — show as a checklist item on the Month tab</span>
       </label>
 
       <p class="form-error" id="templateFormError" hidden></p>
