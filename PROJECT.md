@@ -59,7 +59,8 @@ Apple Developer account, and no Mac required.
     delete, blocked while a value is still in use by either), each
     collapsed by default to keep the screen from being dominated by
     long lists. A full tab/screen, not a popup sheet, for consistency
-    with the other tabs.
+    with the other tabs. A version number ("Ledger vX.Y.Z") is shown
+    at the bottom of the screen, hardcoded in `index.html`.
 - The floating "+" add-transaction button only shows on the Month
   tab (hidden on Dashboard/Credit Card Bills/Templates/Settings), positioned above the
   tab bar.
@@ -225,8 +226,14 @@ automatically within about a minute.
 
 **Important:** whenever any of `index.html`, `styles.css`, `app.js`,
 or `manifest.json`/icons change, bump `CACHE_NAME` in
-`service-worker.js`. Otherwise devices that already installed the app
-keep serving the old cached version indefinitely.
+`service-worker.js` (e.g. `ledger-cache-v21` -> `ledger-cache-v22`).
+Otherwise devices that already installed the app keep serving the old
+cached version indefinitely. In the same commit, set `APP_VERSION` in
+`app.js` (shown in Settings as "Ledger vX.Y.Z", rendered into
+`#appVersionLabel` in `index.html`) so its patch number matches the
+new `CACHE_NAME` number — e.g. `ledger-cache-v22` -> `APP_VERSION =
+"1.0.22"`. Bump the minor/major segment instead of the patch for a
+new feature or breaking/data-model change.
 
 ## Conventions to keep
 
