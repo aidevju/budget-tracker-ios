@@ -799,6 +799,12 @@
     renderAll();
     showScreen("month");
   });
+  document.getElementById("goToCalendarBtn").addEventListener("click", () => {
+    monthView = "calendar";
+    selectedCalendarDate = null;
+    renderAll();
+    showScreen("month");
+  });
   exportBtn.addEventListener("click", exportMonthCSV);
 
   document.getElementById("monthViewToggle").addEventListener("click", (e) => {

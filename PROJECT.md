@@ -31,11 +31,14 @@ Apple Developer account, and no Mac required.
     clears the filter) and seeds that date into the floating "+"
     add-transaction sheet, so tapping an empty day is a quick way to
     log something for it.
-  - **Dashboard**: top category, average daily spend, and a
-    spending-by-category pie chart (with legend) for the last-viewed
-    month, plus a 6-month expense trend with a "Today" link. Tapping
-    a trend month jumps back to the Month tab on that month, for
-    drill-down. Also shows a **Credit Cards** panel — one row per
+  - **Dashboard**: a "Calendar" link next to the title jumps to the
+    Month tab with its Calendar view active, on the same last-viewed
+    month the Dashboard itself is showing. Below that: top category,
+    average daily spend, and a spending-by-category pie chart (with
+    legend) for the last-viewed month, plus a 6-month expense trend
+    with a "Today" link. Tapping a trend month jumps back to the
+    Month tab on that month, for drill-down. Also shows a **Credit
+    Cards** panel — one row per
     account with a nonzero unbilled Credit-Card balance (plus an
     "Unspecified card" bucket for charges with no account set), each
     with a "Pay Bill" action that opens the Pay Card Bill sheet, plus a
