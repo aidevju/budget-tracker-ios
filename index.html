@@ -78,12 +78,30 @@
       <div id="breakdownList" class="breakdown-list"></div>
     </section>
 
-    <!-- Transactions list -->
+    <!-- Transactions list, with a List/Calendar view toggle -->
     <section class="transactions">
       <div class="list-header-row">
         <h2>Transactions</h2>
-        <button type="button" class="link-btn" id="exportBtn">Export CSV</button>
+        <div class="list-header-actions">
+          <button type="button" class="link-btn" id="clearDayFilterBtn" hidden>Show all</button>
+          <button type="button" class="link-btn" id="exportBtn">Export CSV</button>
+        </div>
       </div>
+
+      <div class="type-toggle view-toggle" id="monthViewToggle">
+        <button type="button" class="type-btn active" data-view="list">List</button>
+        <button type="button" class="type-btn" data-view="calendar">Calendar</button>
+      </div>
+
+      <!-- Calendar grid: a day per cell, dots mark income/expense present
+           that day; tapping a day filters the list below to just that day -->
+      <div class="calendar-card" id="calendarCard" hidden>
+        <div class="calendar-weekdays">
+          <span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span>
+        </div>
+        <div class="calendar-grid" id="calendarGrid"></div>
+      </div>
+
       <div id="txList" class="tx-list">
         <p class="empty-state" id="emptyState">No transactions yet this month. Tap + to add your first one.</p>
       </div>

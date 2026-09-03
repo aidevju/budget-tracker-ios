@@ -71,6 +71,8 @@
   let editingTemplateId = null; // null = adding new
   let templateType = "expense"; // independent from currentType — the template sheet has its own type toggle
   let appliedTemplateId = null; // template the open add-transaction sheet was seeded from, for fromTemplateId tagging
+  let monthView = "list"; // "list" | "calendar" — Month tab's Transactions section view
+  let selectedCalendarDate = null; // "YYYY-MM-DD" tapped in the calendar grid, or null (no day filter)
 
   // ---------- Storage ----------
   function loadTransactions() {
@@ -748,6 +750,7 @@
         btn.addEventListener("click", () => {
           viewYear = parseInt(btn.dataset.year, 10);
           viewMonth = parseInt(btn.dataset.month, 10);
+          selectedCalendarDate = null;
           renderAll();
           showScreen("month");
         });
@@ -792,15 +795,28 @@
   goToTodayBtn.addEventListener("click", () => {
     viewYear = today.getFullYear();
     viewMonth = today.getMonth();
+    selectedCalendarDate = null;
     renderAll();
     showScreen("month");
   });
   exportBtn.addEventListener("click", exportMonthCSV);
 
-  function renderList(monthTx) {
+  document.getElementById("monthViewToggle").addEventListener("click", (e) => {
+    const btn = e.target.closest(".type-btn");
+    if (!btn || btn.dataset.view === monthView) return;
+    monthView = btn.dataset.view;
+    selectedCalendarDate = null;
+    renderAll();
+  });
+  document.getElementById("clearDayFilterBtn").addEventListener("click", () => {
+    selectedCalendarDate = null;
+    renderAll();
+  });
+
+  function renderList(monthTx, emptyMessage) {
     const listEl = document.getElementById("txList");
     if (monthTx.length === 0) {
-      listEl.innerHTML = `<p class="empty-state">No transactions yet this month. Tap + to add your first one.</p>`;
+      listEl.innerHTML = `<p class="empty-state">${emptyMessage || "No transactions yet this month. Tap + to add your first one."}</p>`;
       return;
     }
 
@@ -834,6 +850,60 @@
     });
   }
 
+  // Day-grid alternate to the day-grouped list, toggled via #monthViewToggle.
+  // Each day cell shows a small dot for income and/or expense present that
+  // day; tapping a day filters the Transactions list below to just that day
+  // (tapping the same day again, or "Show all", clears the filter).
+  function renderCalendarGrid(monthTx) {
+    const grid = document.getElementById("calendarGrid");
+    const totalDays = daysInMonth(viewYear, viewMonth);
+    const firstWeekday = new Date(viewYear, viewMonth, 1).getDay(); // 0 = Sunday
+    const byDay = {};
+    monthTx.forEach(t => {
+      if (!byDay[t.date]) byDay[t.date] = {};
+      byDay[t.date][t.type] = true;
+    });
+    const todayStr = todayISO();
+
+    let cells = "";
+    for (let i = 0; i < firstWeekday; i++) {
+      cells += `<div class="calendar-day empty"></div>`;
+    }
+    for (let day = 1; day <= totalDays; day++) {
+      const dateStr = `${viewYear}-${String(viewMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      const marks = byDay[dateStr];
+      const classes = ["calendar-day"];
+      if (dateStr === todayStr) classes.push("today");
+      if (dateStr === selectedCalendarDate) classes.push("selected");
+      cells += `
+        <button type="button" class="${classes.join(" ")}" data-date="${dateStr}">
+          <span>${day}</span>
+          <span class="cal-dots">${marks && marks.income ? `<span class="cal-dot income"></span>` : ""}${marks && marks.expense ? `<span class="cal-dot expense"></span>` : ""}</span>
+        </button>
+      `;
+    }
+    grid.innerHTML = cells;
+
+    grid.querySelectorAll(".calendar-day:not(.empty)").forEach(cell => {
+      cell.addEventListener("click", () => {
+        const date = cell.dataset.date;
+        selectedCalendarDate = selectedCalendarDate === date ? null : date;
+        renderAll();
+      });
+    });
+  }
+
+  function renderMonthView(monthTx) {
+    document.getElementById("calendarCard").hidden = monthView !== "calendar";
+    document.getElementById("monthViewToggle").querySelectorAll(".type-btn").forEach(b => b.classList.toggle("active", b.dataset.view === monthView));
+    if (monthView === "calendar") renderCalendarGrid(monthTx);
+
+    const filtering = monthView === "calendar" && selectedCalendarDate;
+    document.getElementById("clearDayFilterBtn").hidden = !filtering;
+    const shown = filtering ? monthTx.filter(t => t.date === selectedCalendarDate) : monthTx;
+    renderList(shown, filtering ? "No transactions on this day. Tap + to add one." : undefined);
+  }
+
   function renderAll() {
     renderMonthLabel();
     const monthTx = getMonthTransactions();
@@ -841,7 +911,7 @@
     renderTargetCard(monthTx);
     renderRecurringCard(monthTx);
     renderBreakdown(monthTx);
-    renderList(monthTx);
+    renderMonthView(monthTx);
     if (currentScreen === "dashboard") renderDashboardScreen();
   }
 
@@ -1014,7 +1084,8 @@
       paymentMethodInput.value = "Cash";
       accountInput.value = "";
       noteInput.value = "";
-      dateInput.value = todayISO();
+      // Default to the day tapped in the calendar grid, if one's selected.
+      dateInput.value = (monthView === "calendar" && selectedCalendarDate) ? selectedCalendarDate : todayISO();
       deleteBtn.hidden = true;
       linkedChargesSection.hidden = true;
     }
@@ -2240,11 +2311,13 @@
   document.getElementById("prevMonth").addEventListener("click", () => {
     viewMonth--;
     if (viewMonth < 0) { viewMonth = 11; viewYear--; }
+    selectedCalendarDate = null;
     renderAll();
   });
   document.getElementById("nextMonth").addEventListener("click", () => {
     viewMonth++;
     if (viewMonth > 11) { viewMonth = 0; viewYear++; }
+    selectedCalendarDate = null;
     renderAll();
   });
 

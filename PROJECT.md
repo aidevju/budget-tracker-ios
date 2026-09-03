@@ -19,9 +19,18 @@ Apple Developer account, and no Mac required.
     still needing input sort first; tapping one opens the
     add-transaction sheet pre-filled from that template (date defaults
     to today when viewing the current month, otherwise the 1st of the
-    viewed month), a category breakdown (expenses only), a day-grouped
-    transaction list, and an "Export CSV" link next to the
-    transactions header.
+    viewed month), a category breakdown (expenses only), and a
+    Transactions section: a header row ("Export CSV" link, plus a
+    "Show all" link that only appears while day-filtered — see below),
+    a List/Calendar view toggle (defaults to List), then the list
+    itself. List is the original day-grouped transaction list.
+    Calendar is a day-cell grid for the viewed month (weekday-aligned,
+    today outlined) — each day with activity shows a small dot per
+    type present (green income, red expense); tapping a day filters
+    the list below to just that day (tapping it again, or "Show all",
+    clears the filter) and seeds that date into the floating "+"
+    add-transaction sheet, so tapping an empty day is a quick way to
+    log something for it.
   - **Dashboard**: top category, average daily spend, and a
     spending-by-category pie chart (with legend) for the last-viewed
     month, plus a 6-month expense trend with a "Today" link. Tapping
