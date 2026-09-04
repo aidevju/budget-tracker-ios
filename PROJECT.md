@@ -13,13 +13,32 @@ Apple Developer account, and no Mac required.
   Bills) reached from Dashboard rather than the tab bar:
   - **Month** (default tab): prev/next month navigation, a
     receipt-styled balance summary, monthly expense target progress,
-    a category breakdown (expenses only), a day-grouped transaction
-    list, and an "Export CSV" link next to the transactions header.
-  - **Dashboard**: top category, average daily spend, and a
-    spending-by-category pie chart (with legend) for the last-viewed
-    month, plus a 6-month expense trend with a "Today" link. Tapping
-    a trend month jumps back to the Month tab on that month, for
-    drill-down. Also shows a **Credit Cards** panel — one row per
+    a **Recurring** checklist (hidden when no template has "Recurs
+    monthly" checked) listing every recurring template with an
+    "Added"/amount-or-"Needs input" status for the viewed month — rows
+    still needing input sort first; tapping one opens the
+    add-transaction sheet pre-filled from that template (date defaults
+    to today when viewing the current month, otherwise the 1st of the
+    viewed month), a category breakdown (expenses only), and a
+    Transactions section: a header row ("Export CSV" link, plus a
+    "Show all" link that only appears while day-filtered — see below),
+    a List/Calendar view toggle (defaults to List), then the list
+    itself. List is the original day-grouped transaction list.
+    Calendar is a day-cell grid for the viewed month (weekday-aligned,
+    today outlined) — each day with activity shows a small dot per
+    type present (green income, red expense); tapping a day filters
+    the list below to just that day (tapping it again, or "Show all",
+    clears the filter) and seeds that date into the floating "+"
+    add-transaction sheet, so tapping an empty day is a quick way to
+    log something for it.
+  - **Dashboard**: a "Calendar" link next to the title jumps to the
+    Month tab with its Calendar view active, on the same last-viewed
+    month the Dashboard itself is showing. Below that: top category,
+    average daily spend, and a spending-by-category pie chart (with
+    legend) for the last-viewed month, plus a 6-month expense trend
+    with a "Today" link. Tapping a trend month jumps back to the
+    Month tab on that month, for drill-down. Also shows a **Credit
+    Cards** panel — one row per
     account with a nonzero unbilled Credit-Card balance (plus an
     "Unspecified card" bucket for charges with no account set), each
     with a "Pay Bill" action that opens the Pay Card Bill sheet, plus a
@@ -36,16 +55,23 @@ Apple Developer account, and no Mac required.
   - **Templates**: a flat, dateless list of recurring income/expense
     presets (category, subcategory, payment method, account, note,
     and an optional amount), each shown with a "—" when no amount is
-    set. An inline "+ Add" header link opens the add/edit sheet (the
-    floating "+" stays Month-only — not reused here); tapping a row
-    edits it, with Delete inside that sheet. Applying a template from
-    the transaction add sheet's picker is a one-time copy into a new,
-    independent transaction — there's no persistent link back. An
-    "Export CSV" header link (next to "+ Add") downloads all templates
-    as a CSV (Type, Category, Subcategory, Payment Method, Account,
-    Note, Amount — Amount blank when unset); the matching "Import
-    Templates" action lives in Settings (see below), since that's
-    where the transaction Import CSV action already lives.
+    set, plus an optional "Recurs monthly" checkbox. A recurring
+    template shows a small repeat-icon badge next to its category on
+    this list. An inline "+ Add" header link opens the add/edit sheet
+    (the floating "+" stays Month-only — not reused here); tapping a
+    row edits it, with Delete inside that sheet. Applying a template
+    from the transaction add sheet's picker is a one-time copy into a
+    new, independent transaction — no persistent link back, *except*
+    when the template is a recurring one, in which case the created
+    transaction is tagged `fromTemplateId` purely so the Month tab's
+    Recurring checklist (below) can tell it's been fulfilled for the
+    month — see the data model section. An "Export CSV" header link
+    (next to "+ Add") downloads all templates as a CSV (Type,
+    Category, Subcategory, Payment Method, Account, Note, Amount,
+    Recurring — Amount blank when unset, Recurring "Yes" or blank);
+    the matching "Import Templates" action lives in Settings (see
+    below), since that's where the transaction Import CSV action
+    already lives.
   - **Settings**: theme (light / dark / system), a currency symbol
     picker (defaults to no symbol), an optional monthly expense
     target, the credit-card bill suggestion window (days), an
@@ -144,7 +170,8 @@ Stored client-side in `localStorage`, nothing leaves the device.
   ```js
   { id, type: "income" | "expense", amount: number, category: string,
     subcategory: string, note: string, date: "YYYY-MM-DD",
-    paymentMethod: string, account: string, reconciledBillId?: string }
+    paymentMethod: string, account: string, reconciledBillId?: string,
+    fromTemplateId?: string }
   ```
   `subcategory` and `account` are optional freeform text — no fixed
   taxonomy, just a custom autosuggest dropdown (`setupAutosuggest()` in
@@ -156,7 +183,14 @@ Stored client-side in `localStorage`, nothing leaves the device.
   present only on a Credit-Card expense that's been linked, via the
   Pay Card Bill flow, to the expense transaction that settled it; its
   *absence* is what makes a charge "unbilled" — there's no separate
-  status field.
+  status field. `fromTemplateId` is optional — set only when the
+  transaction was created by applying a **recurring** template (from
+  the Month tab's Recurring checklist or the picker in the
+  transaction add sheet); it exists solely so the checklist can tell
+  a recurring template's been fulfilled for a given month
+  (`renderRecurringCard()` in `app.js`) — like `reconciledBillId`, a
+  one-way tag, not a live sync: editing or deleting the source
+  template afterward doesn't touch already-tagged transactions.
 - `ledger_settings_v1` — JSON object:
   ```js
   { theme: "light" | "dark" | "system", currency: "none" | "USD" | "PHP" | ...,
@@ -171,16 +205,25 @@ Stored client-side in `localStorage`, nothing leaves the device.
 - `ledger_templates_v1` — JSON array of:
   ```js
   { id, type: "income" | "expense", category: string, subcategory: string,
-    note: string, paymentMethod: string, account: string, amount: number | null }
+    note: string, paymentMethod: string, account: string, amount: number | null,
+    recurring: boolean }
   ```
   Dateless by design — mirrors the source spreadsheet's `Common`/
   `Monthly` sheets, which are flat recurring-item lists with no date
   column. `amount` is nullable: a template with no amount just leaves
   Amount blank when applied, for the user to fill in. Applying a
-  template (from the picker inside the transaction add sheet) is a
-  one-time copy into a new, independent transaction — deliberately
-  **no** persistent link back, unlike `reconciledBillId` above, since
-  there's no "settlement" concept for templates.
+  template (from the picker inside the transaction add sheet, or from
+  the Month tab's Recurring checklist) is a one-time copy into a new,
+  independent transaction — deliberately **no** persistent link back,
+  unlike `reconciledBillId` above, since there's no "settlement"
+  concept for templates — except that a **recurring** template's
+  applied transaction is tagged `fromTemplateId` (see
+  `ledger_transactions_v1` above), which exists only to drive the
+  Recurring checklist's "added this month" status, not as a real
+  settlement link. `recurring` (default/absent = `false`) marks a
+  template to show as a checklist row on the Month tab for every
+  month, with a small repeat-icon badge next to it on the Templates
+  list.
 - `ledger_lists_v1` — JSON object:
   ```js
   { expenseCategories: string[], incomeCategories: string[],

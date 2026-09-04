@@ -4,7 +4,7 @@
   // Minor number must match the number in service-worker.js's CACHE_NAME
   // (e.g. "ledger-cache-v21" -> "1.21") — bump both together whenever
   // CACHE_NAME is bumped.
-  const APP_VERSION = "1.22";
+  const APP_VERSION = "1.24";
 
   const STORAGE_KEY = "ledger_transactions_v1";
   const SETTINGS_KEY = "ledger_settings_v1";
@@ -75,6 +75,9 @@
   let billCheckedIds = new Set(); // ids of candidate charges currently checked in the Pay Card Bill sheet
   let editingTemplateId = null; // null = adding new
   let templateType = "expense"; // independent from currentType — the template sheet has its own type toggle
+  let appliedTemplateId = null; // template the open add-transaction sheet was seeded from, for fromTemplateId tagging
+  let monthView = "list"; // "list" | "calendar" — Month tab's Transactions section view
+  let selectedCalendarDate = null; // "YYYY-MM-DD" tapped in the calendar grid, or null (no day filter)
 
   // ---------- Storage ----------
   function loadTransactions() {
@@ -553,6 +556,59 @@
     }
   }
 
+  // Recurring monthly templates checklist for the viewed month — a template
+  // counts as "added" for the month once some transaction in it carries a
+  // fromTemplateId pointing back to that template (set only when the
+  // transaction was created by applying that template, via this checklist
+  // or the picker in the add-transaction sheet).
+  function renderRecurringCard(monthTx) {
+    const card = document.getElementById("recurringCard");
+    const recurringTemplates = templates.filter(t => t.recurring);
+    if (recurringTemplates.length === 0) {
+      card.hidden = true;
+      return;
+    }
+    card.hidden = false;
+
+    const fulfilledIds = new Set(monthTx.filter(t => t.fromTemplateId).map(t => t.fromTemplateId));
+    const rows = recurringTemplates.map(t => ({ t, done: fulfilledIds.has(t.id) }));
+    const doneCount = rows.filter(r => r.done).length;
+    document.getElementById("recurringStatusCount").textContent = `${doneCount}/${rows.length} added`;
+
+    // Rows still needing input surface first.
+    rows.sort((a, b) => Number(a.done) - Number(b.done));
+
+    document.getElementById("recurringList").innerHTML = rows.map(({ t, done }) => {
+      if (done) {
+        return `
+          <div class="recurring-row done">
+            <span class="recurring-dot done ${t.type}"></span>
+            <span class="recurring-name">${escapeHtml(templateLabel(t))}</span>
+            <span class="recurring-status">Added</span>
+          </div>
+        `;
+      }
+      return `
+        <button type="button" class="recurring-row" data-id="${t.id}">
+          <span class="recurring-dot ${t.type}"></span>
+          <span class="recurring-name">${escapeHtml(templateLabel(t))}</span>
+          <span class="recurring-status">${t.amount != null ? formatMoney(t.amount) : "Needs input"}</span>
+        </button>
+      `;
+    }).join("");
+
+    document.getElementById("recurringList").querySelectorAll(".recurring-row:not(.done)").forEach(row => {
+      row.addEventListener("click", () => {
+        const t = templates.find(tpl => tpl.id === row.dataset.id);
+        if (!t) return;
+        openSheet("add");
+        applyTemplateToForm(t);
+        const isCurrentMonth = viewYear === today.getFullYear() && viewMonth === today.getMonth();
+        dateInput.value = isCurrentMonth ? todayISO() : `${viewYear}-${String(viewMonth + 1).padStart(2, "0")}-01`;
+      });
+    });
+  }
+
   // ---------- Credit-card bill reconciliation ----------
   function unbilledTotalsByAccount() {
     const totals = {};
@@ -724,6 +780,7 @@
         btn.addEventListener("click", () => {
           viewYear = parseInt(btn.dataset.year, 10);
           viewMonth = parseInt(btn.dataset.month, 10);
+          selectedCalendarDate = null;
           renderAll();
           showScreen("month");
         });
@@ -751,6 +808,9 @@
     Object.entries(SCREENS).forEach(([key, el]) => { el.hidden = key !== name; });
     addBtn.hidden = name !== "month";
     document.querySelectorAll(".tab").forEach(tab => tab.classList.toggle("active", tab.dataset.screen === name));
+    // Templates (and their recurring flag) can change on the Templates
+    // screen, so refresh the checklist whenever Month becomes visible again.
+    if (name === "month") renderRecurringCard(getMonthTransactions());
     if (name === "dashboard") renderDashboardScreen();
     if (name === "billHistory") renderBillHistoryScreen();
     if (name === "templates") renderTemplatesScreen();
@@ -765,15 +825,34 @@
   goToTodayBtn.addEventListener("click", () => {
     viewYear = today.getFullYear();
     viewMonth = today.getMonth();
+    selectedCalendarDate = null;
+    renderAll();
+    showScreen("month");
+  });
+  document.getElementById("goToCalendarBtn").addEventListener("click", () => {
+    monthView = "calendar";
+    selectedCalendarDate = null;
     renderAll();
     showScreen("month");
   });
   exportBtn.addEventListener("click", exportMonthCSV);
 
-  function renderList(monthTx) {
+  document.getElementById("monthViewToggle").addEventListener("click", (e) => {
+    const btn = e.target.closest(".type-btn");
+    if (!btn || btn.dataset.view === monthView) return;
+    monthView = btn.dataset.view;
+    selectedCalendarDate = null;
+    renderAll();
+  });
+  document.getElementById("clearDayFilterBtn").addEventListener("click", () => {
+    selectedCalendarDate = null;
+    renderAll();
+  });
+
+  function renderList(monthTx, emptyMessage) {
     const listEl = document.getElementById("txList");
     if (monthTx.length === 0) {
-      listEl.innerHTML = `<p class="empty-state">No transactions yet this month. Tap + to add your first one.</p>`;
+      listEl.innerHTML = `<p class="empty-state">${emptyMessage || "No transactions yet this month. Tap + to add your first one."}</p>`;
       return;
     }
 
@@ -807,13 +886,68 @@
     });
   }
 
+  // Day-grid alternate to the day-grouped list, toggled via #monthViewToggle.
+  // Each day cell shows a small dot for income and/or expense present that
+  // day; tapping a day filters the Transactions list below to just that day
+  // (tapping the same day again, or "Show all", clears the filter).
+  function renderCalendarGrid(monthTx) {
+    const grid = document.getElementById("calendarGrid");
+    const totalDays = daysInMonth(viewYear, viewMonth);
+    const firstWeekday = new Date(viewYear, viewMonth, 1).getDay(); // 0 = Sunday
+    const byDay = {};
+    monthTx.forEach(t => {
+      if (!byDay[t.date]) byDay[t.date] = {};
+      byDay[t.date][t.type] = true;
+    });
+    const todayStr = todayISO();
+
+    let cells = "";
+    for (let i = 0; i < firstWeekday; i++) {
+      cells += `<div class="calendar-day empty"></div>`;
+    }
+    for (let day = 1; day <= totalDays; day++) {
+      const dateStr = `${viewYear}-${String(viewMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      const marks = byDay[dateStr];
+      const classes = ["calendar-day"];
+      if (dateStr === todayStr) classes.push("today");
+      if (dateStr === selectedCalendarDate) classes.push("selected");
+      cells += `
+        <button type="button" class="${classes.join(" ")}" data-date="${dateStr}">
+          <span>${day}</span>
+          <span class="cal-dots">${marks && marks.income ? `<span class="cal-dot income"></span>` : ""}${marks && marks.expense ? `<span class="cal-dot expense"></span>` : ""}</span>
+        </button>
+      `;
+    }
+    grid.innerHTML = cells;
+
+    grid.querySelectorAll(".calendar-day:not(.empty)").forEach(cell => {
+      cell.addEventListener("click", () => {
+        const date = cell.dataset.date;
+        selectedCalendarDate = selectedCalendarDate === date ? null : date;
+        renderAll();
+      });
+    });
+  }
+
+  function renderMonthView(monthTx) {
+    document.getElementById("calendarCard").hidden = monthView !== "calendar";
+    document.getElementById("monthViewToggle").querySelectorAll(".type-btn").forEach(b => b.classList.toggle("active", b.dataset.view === monthView));
+    if (monthView === "calendar") renderCalendarGrid(monthTx);
+
+    const filtering = monthView === "calendar" && selectedCalendarDate;
+    document.getElementById("clearDayFilterBtn").hidden = !filtering;
+    const shown = filtering ? monthTx.filter(t => t.date === selectedCalendarDate) : monthTx;
+    renderList(shown, filtering ? "No transactions on this day. Tap + to add one." : undefined);
+  }
+
   function renderAll() {
     renderMonthLabel();
     const monthTx = getMonthTransactions();
     renderSummary(monthTx);
     renderTargetCard(monthTx);
+    renderRecurringCard(monthTx);
     renderBreakdown(monthTx);
-    renderList(monthTx);
+    renderMonthView(monthTx);
     if (currentScreen === "dashboard") renderDashboardScreen();
   }
 
@@ -825,6 +959,8 @@
     if (t.note) label += ` — ${t.note}`;
     return label;
   }
+
+  const RECURRING_ICON = `<svg class="recurring-badge" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-label="Recurs monthly"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>`;
 
   function renderTemplateRow(t) {
     const metaParts = [];
@@ -839,7 +975,7 @@
       <button class="tx-row" data-id="${t.id}">
         <span class="tx-dot ${t.type}"></span>
         <span class="tx-main">
-          <span class="tx-category">${escapeHtml(t.category)}${t.subcategory ? " · " + escapeHtml(t.subcategory) : ""}</span>
+          <span class="tx-category">${escapeHtml(t.category)}${t.subcategory ? " · " + escapeHtml(t.subcategory) : ""}${t.recurring ? RECURRING_ICON : ""}</span>
           ${metaParts.length ? `<span class="tx-note">${escapeHtml(metaParts.join(" · "))}</span>` : ""}
         </span>
         <span class="${amountClass}">${amountText}</span>
@@ -860,7 +996,7 @@
   }
 
   function exportTemplatesCSV() {
-    const lines = [csvRow(["Type", "Category", "Subcategory", "Payment Method", "Account", "Note", "Amount"])];
+    const lines = [csvRow(["Type", "Category", "Subcategory", "Payment Method", "Account", "Note", "Amount", "Recurring"])];
     templates.forEach(t => {
       lines.push(csvRow([
         t.type === "income" ? "Income" : "Expense",
@@ -869,7 +1005,8 @@
         t.paymentMethod || "Cash",
         t.account || "",
         t.note || "",
-        t.amount != null ? t.amount.toFixed(2) : ""
+        t.amount != null ? t.amount.toFixed(2) : "",
+        t.recurring ? "Yes" : ""
       ]));
     });
 
@@ -949,6 +1086,7 @@
   function openSheet(mode, id) {
     formError.hidden = true;
     templatePickerField.hidden = mode !== "add";
+    appliedTemplateId = null;
     if (mode === "edit") {
       const tx = transactions.find(t => t.id === id);
       if (!tx) return;
@@ -983,7 +1121,8 @@
       paymentMethodInput.value = "Cash";
       accountInput.value = "";
       noteInput.value = "";
-      dateInput.value = todayISO();
+      // Default to the day tapped in the calendar grid, if one's selected.
+      dateInput.value = (monthView === "calendar" && selectedCalendarDate) ? selectedCalendarDate : todayISO();
       deleteBtn.hidden = true;
       linkedChargesSection.hidden = true;
     }
@@ -1008,18 +1147,28 @@
     if (btn) setType(btn.dataset.type);
   });
 
+  // Seeds the add-transaction form from a template's fields — shared by the
+  // in-sheet template picker and the Month tab's recurring checklist rows.
+  // Records which template this add is seeded from (appliedTemplateId) so a
+  // saved transaction can be tagged with fromTemplateId, letting the
+  // recurring checklist tell it's been fulfilled for the month — the only
+  // exception to templates otherwise leaving no persistent link back.
+  function applyTemplateToForm(t) {
+    setType(t.type);
+    categoryInput.value = t.category;
+    subcategoryInput.value = t.subcategory || "";
+    paymentMethodInput.value = t.paymentMethod || "Cash";
+    accountInput.value = t.account || "";
+    noteInput.value = t.note || "";
+    if (t.amount != null) amountInput.value = t.amount;
+    appliedTemplateId = t.id;
+  }
+
   templatePickerInput.addEventListener("change", () => {
     const id = templatePickerInput.value;
     if (!id) return;
     const t = templates.find(tpl => tpl.id === id);
-    if (t) {
-      categoryInput.value = t.category;
-      subcategoryInput.value = t.subcategory || "";
-      paymentMethodInput.value = t.paymentMethod || "Cash";
-      accountInput.value = t.account || "";
-      noteInput.value = t.note || "";
-      if (t.amount != null) amountInput.value = t.amount;
-    }
+    if (t) applyTemplateToForm(t);
     templatePickerInput.value = ""; // one-time apply — not a sticky/bound selection
   });
 
@@ -1059,7 +1208,8 @@
         note: noteInput.value.trim(),
         date,
         paymentMethod,
-        account
+        account,
+        ...(appliedTemplateId ? { fromTemplateId: appliedTemplateId } : {})
       });
     }
     const saved = saveTransactions();
@@ -1242,6 +1392,7 @@
   const templateAccountInput = document.getElementById("templateAccountInput");
   const templateNoteInput = document.getElementById("templateNoteInput");
   const templateAmountInput = document.getElementById("templateAmountInput");
+  const templateRecurringInput = document.getElementById("templateRecurringInput");
   const templateFormError = document.getElementById("templateFormError");
   const templateDeleteBtn = document.getElementById("templateDeleteBtn");
   const templateCancelBtn = document.getElementById("templateCancelBtn");
@@ -1276,6 +1427,7 @@
       templateAccountInput.value = t.account || "";
       templateNoteInput.value = t.note || "";
       templateAmountInput.value = t.amount != null ? t.amount : "";
+      templateRecurringInput.checked = !!t.recurring;
       templateDeleteBtn.hidden = false;
     } else {
       editingTemplateId = null;
@@ -1286,6 +1438,7 @@
       templateAccountInput.value = "";
       templateNoteInput.value = "";
       templateAmountInput.value = "";
+      templateRecurringInput.checked = false;
       templateDeleteBtn.hidden = true;
     }
     templateBackdrop.classList.add("open");
@@ -1323,13 +1476,14 @@
       }
       amount = parsed;
     }
+    const recurring = templateRecurringInput.checked;
 
     const isEdit = !!editingTemplateId;
     if (editingTemplateId) {
       const t = templates.find(tpl => tpl.id === editingTemplateId);
-      Object.assign(t, { type: templateType, category, subcategory, paymentMethod, account, note, amount });
+      Object.assign(t, { type: templateType, category, subcategory, paymentMethod, account, note, amount, recurring });
     } else {
-      templates.push({ id: uid(), type: templateType, category, subcategory, paymentMethod, account, note, amount });
+      templates.push({ id: uid(), type: templateType, category, subcategory, paymentMethod, account, note, amount, recurring });
     }
     const saved = saveTemplates();
     closeTemplateSheet();
@@ -1693,7 +1847,8 @@
     "payment method": "paymentMethod",
     "account": "account",
     "note": "note",
-    "amount": "amount"
+    "amount": "amount",
+    "recurring": "recurring"
   };
 
   function hasRequiredTemplateColumns(headerIndex) {
@@ -1717,6 +1872,9 @@
       if (isNaN(amount) || amount <= 0) return { ok: false, reason: "Amount must be greater than 0, or left blank" };
     }
 
+    const recurringRaw = importCell(rawRow, headerIndex, "recurring").trim().toLowerCase();
+    const recurring = recurringRaw === "yes" || recurringRaw === "true" || recurringRaw === "1";
+
     return {
       ok: true,
       tpl: {
@@ -1726,7 +1884,8 @@
         paymentMethod: importCell(rawRow, headerIndex, "paymentMethod") || "Cash",
         account: importCell(rawRow, headerIndex, "account"),
         note: importCell(rawRow, headerIndex, "note"),
-        amount
+        amount,
+        recurring
       }
     };
   }
@@ -2193,11 +2352,13 @@
   document.getElementById("prevMonth").addEventListener("click", () => {
     viewMonth--;
     if (viewMonth < 0) { viewMonth = 11; viewYear--; }
+    selectedCalendarDate = null;
     renderAll();
   });
   document.getElementById("nextMonth").addEventListener("click", () => {
     viewMonth++;
     if (viewMonth > 11) { viewMonth = 0; viewYear++; }
+    selectedCalendarDate = null;
     renderAll();
   });
 
