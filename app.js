@@ -1,6 +1,11 @@
 (() => {
   "use strict";
 
+  // Minor number must match the number in service-worker.js's CACHE_NAME
+  // (e.g. "ledger-cache-v21" -> "1.21") — bump both together whenever
+  // CACHE_NAME is bumped.
+  const APP_VERSION = "1.24";
+
   const STORAGE_KEY = "ledger_transactions_v1";
   const SETTINGS_KEY = "ledger_settings_v1";
   const LISTS_KEY = "ledger_lists_v1";
@@ -311,7 +316,31 @@
     return [...set].sort((a, b) => a.localeCompare(b));
   }
 
-  function setupAutosuggest(inputEl, listEl, field) {
+  // Looks up the payment method most recently used with a given account, so
+  // the payment method field can be auto-populated once the user names an
+  // account they've used before (e.g. "BPI" always paid via Debit Card).
+  function mostRecentPaymentMethodForAccount(account) {
+    const norm = account.trim().toLowerCase();
+    if (!norm) return null;
+    const matches = transactions.filter(t => t.paymentMethod && (t.account || "").trim().toLowerCase() === norm);
+    if (matches.length === 0) return null;
+    matches.sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
+    return matches[matches.length - 1].paymentMethod;
+  }
+
+  // Wires an account text input to auto-fill a payment method <select> once
+  // the typed/selected account matches one used before. Returns a callback
+  // suitable as setupAutosuggest's onSelect, so a suggestion tap also applies it.
+  function wireAccountPaymentMethodAutofill(accountInputEl, paymentMethodSelectEl) {
+    function tryAutofill() {
+      const pm = mostRecentPaymentMethodForAccount(accountInputEl.value);
+      if (pm) paymentMethodSelectEl.value = pm;
+    }
+    accountInputEl.addEventListener("input", tryAutofill);
+    return tryAutofill;
+  }
+
+  function setupAutosuggest(inputEl, listEl, field, onSelect) {
     function showSuggestions() {
       const query = inputEl.value.trim().toLowerCase();
       const values = distinctFieldValues(field);
@@ -336,6 +365,7 @@
       if (!item) return;
       inputEl.value = item.textContent;
       listEl.hidden = true;
+      if (onSelect) onSelect(item.textContent);
     });
   }
 
@@ -1016,7 +1046,8 @@
   const linkedChargesList = document.getElementById("linkedChargesList");
 
   setupAutosuggest(subcategoryInput, document.getElementById("subcategorySuggestions"), "subcategory");
-  setupAutosuggest(accountInput, document.getElementById("accountSuggestions"), "account");
+  setupAutosuggest(accountInput, document.getElementById("accountSuggestions"), "account",
+    wireAccountPaymentMethodAutofill(accountInput, paymentMethodInput));
 
   function populateCategories() {
     const list = currentType === "expense" ? lists.expenseCategories : lists.incomeCategories;
@@ -1221,7 +1252,8 @@
   const billFormError = document.getElementById("billFormError");
   const billCancelBtn = document.getElementById("billCancelBtn");
 
-  setupAutosuggest(billPaidAccountInput, document.getElementById("billPaidAccountSuggestions"), "account");
+  setupAutosuggest(billPaidAccountInput, document.getElementById("billPaidAccountSuggestions"), "account",
+    wireAccountPaymentMethodAutofill(billPaidAccountInput, billPaymentMethodInput));
 
   function ensureBillsCategoryExists() {
     if (!lists.expenseCategories.includes("Bills")) {
@@ -1367,7 +1399,8 @@
   const addTemplateBtn = document.getElementById("addTemplateBtn");
 
   setupAutosuggest(templateSubcategoryInput, document.getElementById("templateSubcategorySuggestions"), "subcategory");
-  setupAutosuggest(templateAccountInput, document.getElementById("templateAccountSuggestions"), "account");
+  setupAutosuggest(templateAccountInput, document.getElementById("templateAccountSuggestions"), "account",
+    wireAccountPaymentMethodAutofill(templateAccountInput, templatePaymentMethodInput));
 
   function populateTemplateCategories() {
     const list = templateType === "expense" ? lists.expenseCategories : lists.incomeCategories;
@@ -2165,6 +2198,8 @@
   const currencySelect = document.getElementById("currencySelect");
   const targetInput = document.getElementById("targetInput");
   const ccWindowInput = document.getElementById("ccWindowInput");
+
+  document.getElementById("appVersionLabel").textContent = `Ledger v${APP_VERSION}`;
 
   function populateCurrencyOptions() {
     currencySelect.innerHTML = CURRENCIES.map(c => `<option value="${c.code}">${c.label}</option>`).join("");
