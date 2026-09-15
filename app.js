@@ -4,12 +4,13 @@
   // Minor number must match the number in service-worker.js's CACHE_NAME
   // (e.g. "ledger-cache-v21" -> "1.21") — bump both together whenever
   // CACHE_NAME is bumped.
-  const APP_VERSION = "1.22";
+  const APP_VERSION = "1.24";
 
   const STORAGE_KEY = "ledger_transactions_v1";
   const SETTINGS_KEY = "ledger_settings_v1";
   const LISTS_KEY = "ledger_lists_v1";
   const TEMPLATES_KEY = "ledger_templates_v1";
+  const RECURRING_KEY = "ledger_recurring_v1";
 
   // Default category/payment-method lists, seeded into ledger_lists_v1 the
   // first time the app runs (or the first time it runs after this feature
@@ -65,6 +66,7 @@
   let settings = loadSettings();
   let lists = loadLists();
   let templates = loadTemplates();
+  let recurring = loadRecurring();
   const today = new Date();
   let viewYear = today.getFullYear();
   let viewMonth = today.getMonth(); // 0-indexed
@@ -75,6 +77,11 @@
   let billCheckedIds = new Set(); // ids of candidate charges currently checked in the Pay Card Bill sheet
   let editingTemplateId = null; // null = adding new
   let templateType = "expense"; // independent from currentType — the template sheet has its own type toggle
+  let editingRecurringId = null; // null = adding new
+  let recurringType = "expense"; // independent from currentType/templateType — its own type toggle
+  let recurringFrequency = "monthly";
+  let recurringActiveChoice = true;
+  let pendingRecurringLink = null; // { recId, due } while the transaction sheet is open to fill in an amount-less occurrence's amount
 
   // ---------- Storage ----------
   function loadTransactions() {
@@ -167,6 +174,27 @@
     }
   }
 
+  function loadRecurring() {
+    try {
+      const raw = localStorage.getItem(RECURRING_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch (e) {
+      console.error("Failed to load recurring items", e);
+      return [];
+    }
+  }
+
+  function saveRecurring() {
+    try {
+      localStorage.setItem(RECURRING_KEY, JSON.stringify(recurring));
+      return true;
+    } catch (e) {
+      console.error("Failed to save recurring items", e);
+      showToast("Couldn't save recurring item.", "error");
+      return false;
+    }
+  }
+
   function uid() {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   }
@@ -181,7 +209,11 @@
   function listUsageCounts(listKey, value) {
     const { field, type } = listFieldAndType(listKey);
     const matches = (t) => t[field] === value && (type === null || t.type === type);
-    return { transactions: transactions.filter(matches).length, templates: templates.filter(matches).length };
+    return {
+      transactions: transactions.filter(matches).length,
+      templates: templates.filter(matches).length,
+      recurring: recurring.filter(matches).length
+    };
   }
 
   function addListValue(listKey, rawValue) {
@@ -216,19 +248,24 @@
     templates.forEach(t => {
       if (t[field] === oldValue && (type === null || t.type === type)) t[field] = newValue;
     });
+    recurring.forEach(r => {
+      if (r[field] === oldValue && (type === null || r.type === type)) r[field] = newValue;
+    });
 
     saveTransactions();
     saveTemplates();
+    saveRecurring();
     saveLists();
   }
 
   // Returns an error message if the value is in use (delete refused), or null on success.
   function deleteListValue(listKey, value) {
     const usage = listUsageCounts(listKey, value);
-    if (usage.transactions > 0 || usage.templates > 0) {
+    if (usage.transactions > 0 || usage.templates > 0 || usage.recurring > 0) {
       const parts = [];
       if (usage.transactions > 0) parts.push(`${usage.transactions} transaction${usage.transactions === 1 ? "" : "s"}`);
       if (usage.templates > 0) parts.push(`${usage.templates} template${usage.templates === 1 ? "" : "s"}`);
+      if (usage.recurring > 0) parts.push(`${usage.recurring} recurring item${usage.recurring === 1 ? "" : "s"}`);
       return `Can't delete — used by ${parts.join(" and ")}.`;
     }
     const arr = lists[listKey];
@@ -368,7 +405,9 @@
 
   // ---------- Rendering ----------
   function renderMonthLabel() {
-    document.getElementById("monthLabel").textContent = `${MONTH_NAMES[viewMonth]} ${viewYear}`;
+    const label = `${MONTH_NAMES[viewMonth]} ${viewYear}`;
+    document.getElementById("monthLabel").textContent = label;
+    document.getElementById("recurringMonthLabel").textContent = label;
   }
 
   function renderSummary(monthTx) {
@@ -739,6 +778,8 @@
     month: document.getElementById("monthScreen"),
     dashboard: document.getElementById("dashboardScreen"),
     billHistory: document.getElementById("billHistoryScreen"),
+    recurring: document.getElementById("recurringScreen"),
+    manageRecurring: document.getElementById("manageRecurringScreen"),
     templates: document.getElementById("templatesScreen"),
     settings: document.getElementById("settingsScreen")
   };
@@ -753,6 +794,8 @@
     document.querySelectorAll(".tab").forEach(tab => tab.classList.toggle("active", tab.dataset.screen === name));
     if (name === "dashboard") renderDashboardScreen();
     if (name === "billHistory") renderBillHistoryScreen();
+    if (name === "recurring") renderRecurringScreen();
+    if (name === "manageRecurring") renderManageRecurringScreen();
     if (name === "templates") renderTemplatesScreen();
     if (name === "settings") syncSettingsUI();
   }
@@ -762,6 +805,8 @@
   });
   document.getElementById("viewBillHistoryBtn").addEventListener("click", () => showScreen("billHistory"));
   document.getElementById("billHistoryBackBtn").addEventListener("click", () => showScreen("dashboard"));
+  document.getElementById("manageRecurringBtn").addEventListener("click", () => showScreen("manageRecurring"));
+  document.getElementById("manageRecurringBackBtn").addEventListener("click", () => showScreen("recurring"));
   goToTodayBtn.addEventListener("click", () => {
     viewYear = today.getFullYear();
     viewMonth = today.getMonth();
@@ -815,6 +860,7 @@
     renderBreakdown(monthTx);
     renderList(monthTx);
     if (currentScreen === "dashboard") renderDashboardScreen();
+    if (currentScreen === "recurring") renderRecurringScreen();
   }
 
   // ---------- Templates screen ----------
@@ -888,6 +934,452 @@
   }
 
   document.getElementById("exportTemplatesBtn").addEventListener("click", exportTemplatesCSV);
+
+  // ---------- Recurring / scheduled items ----------
+  // A recurring item (ledger_recurring_v1) is a template-like preset plus a
+  // schedule (frequency + anchor day/month). Each schedule deterministically
+  // expands into "occurrences" identified by their exact due date — there's
+  // no separate list of occurrence records. A transaction fulfills one by
+  // carrying recurringId + recurringDueDate (set on quick-add below); a
+  // transaction that already exists for that (recurringId, due date) pair
+  // is what makes an occurrence "paid" rather than a status field.
+  function recurringLabel(rec) {
+    let label = rec.subcategory ? `${rec.category} · ${rec.subcategory}` : rec.category;
+    if (rec.note) label += ` — ${rec.note}`;
+    return label;
+  }
+
+  function frequencyLabel(rec) {
+    if (rec.frequency === "monthly") return `Monthly (day ${rec.anchorDay})`;
+    if (rec.frequency === "semimonthly") return `Twice a month (days ${rec.anchorDay} & ${rec.anchorDay2})`;
+    return `Annual (${MONTH_NAMES[rec.anchorMonth - 1].slice(0, 3)} ${rec.anchorDay})`;
+  }
+
+  // Clamps `day` to the last day of the given month (e.g. day 31 in
+  // February becomes the 28th/29th) — the same rule for every frequency,
+  // so a "day 31" monthly schedule just lands on the last day of shorter months.
+  function clampDayISO(year, month, day) {
+    const d = Math.min(day, daysInMonth(year, month));
+    return `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  }
+
+  // Returns the sorted ISO due dates `rec` schedules within
+  // [rangeStartISO, rangeEndISO], clipped to rec.startDate/rec.endDate.
+  function occurrencesInRange(rec, rangeStartISO, rangeEndISO) {
+    const lo = rec.startDate > rangeStartISO ? rec.startDate : rangeStartISO;
+    const hi = rec.endDate && rec.endDate < rangeEndISO ? rec.endDate : rangeEndISO;
+    if (lo > hi) return [];
+
+    const loD = new Date(lo + "T00:00:00");
+    const hiD = new Date(hi + "T00:00:00");
+    const dates = [];
+
+    if (rec.frequency === "annual") {
+      for (let y = loD.getFullYear(); y <= hiD.getFullYear(); y++) {
+        const iso = clampDayISO(y, rec.anchorMonth - 1, rec.anchorDay);
+        if (iso >= lo && iso <= hi) dates.push(iso);
+      }
+    } else {
+      let y = loD.getFullYear(), m = loD.getMonth();
+      const endY = hiD.getFullYear(), endM = hiD.getMonth();
+      while (y < endY || (y === endY && m <= endM)) {
+        const days = rec.frequency === "semimonthly" ? [rec.anchorDay, rec.anchorDay2] : [rec.anchorDay];
+        days.forEach(day => {
+          const iso = clampDayISO(y, m, day);
+          if (iso >= lo && iso <= hi) dates.push(iso);
+        });
+        m++;
+        if (m > 11) { m = 0; y++; }
+      }
+    }
+    return [...new Set(dates)].sort();
+  }
+
+  function occurrencesForMonth(rec, year, month) {
+    const start = `${year}-${String(month + 1).padStart(2, "0")}-01`;
+    const end = `${year}-${String(month + 1).padStart(2, "0")}-${String(daysInMonth(year, month)).padStart(2, "0")}`;
+    return occurrencesInRange(rec, start, end);
+  }
+
+  function findRecurringTransaction(recId, dueDateISO) {
+    return transactions.find(t => t.recurringId === recId && t.recurringDueDate === dueDateISO);
+  }
+
+  function buildMonthOccurrences(year, month) {
+    const rows = [];
+    recurring.forEach(rec => {
+      if (rec.active === false) return;
+      occurrencesForMonth(rec, year, month).forEach(due => {
+        rows.push({ rec, due, tx: findRecurringTransaction(rec.id, due) });
+      });
+    });
+    rows.sort((a, b) => a.due.localeCompare(b.due));
+    return rows;
+  }
+
+  // Unpaid occurrences due before today, across every past month back to
+  // each item's start date — shown regardless of which month is being
+  // browsed, so a missed bill from months ago stays visible until it's paid.
+  function buildOverdueOccurrences() {
+    const cutoff = shiftDateISO(todayISO(), -1);
+    const rows = [];
+    recurring.forEach(rec => {
+      if (rec.active === false) return;
+      occurrencesInRange(rec, rec.startDate, cutoff).forEach(due => {
+        if (!findRecurringTransaction(rec.id, due)) rows.push({ rec, due });
+      });
+    });
+    rows.sort((a, b) => a.due.localeCompare(b.due));
+    return rows;
+  }
+
+  function occurrenceDateLabel(due, includeYear) {
+    const d = new Date(due + "T00:00:00");
+    return d.toLocaleDateString(undefined, includeYear ? { month: "short", day: "numeric", year: "numeric" } : { month: "short", day: "numeric" });
+  }
+
+  function renderOccurrenceRow({ rec, due, tx }, overdue) {
+    if (tx) {
+      return `
+        <button class="tx-row" data-action="edit" data-tx-id="${tx.id}">
+          <span class="tx-dot ${rec.type}"></span>
+          <span class="tx-main">
+            <span class="tx-category">${escapeHtml(recurringLabel(rec))}</span>
+            <span class="tx-note">${occurrenceDateLabel(due, overdue)} · Paid</span>
+          </span>
+          <span class="tx-amount ${rec.type} mono">${rec.type === "expense" ? "-" : "+"}${currencySymbol()}${formatNumber(tx.amount)}</span>
+        </button>
+      `;
+    }
+    const preview = rec.amount != null ? ` · ${formatMoney(rec.amount)}` : "";
+    return `
+      <div class="tx-row recurring-unpaid-row">
+        <span class="tx-dot ${rec.type}"></span>
+        <span class="tx-main">
+          <span class="tx-category">${escapeHtml(recurringLabel(rec))}</span>
+          <span class="tx-note${overdue ? " recurring-overdue-note" : ""}">${occurrenceDateLabel(due, overdue)}${overdue ? " · Overdue" : ""}${preview}</span>
+        </span>
+        <button type="button" class="btn-secondary recurring-add-btn" data-action="add" data-rec-id="${rec.id}" data-due="${due}">Add</button>
+      </div>
+    `;
+  }
+
+  function wireRecurringRowActions(container) {
+    container.querySelectorAll("[data-action='edit']").forEach(btn => {
+      btn.addEventListener("click", () => openSheet("edit", btn.dataset.txId));
+    });
+    container.querySelectorAll("[data-action='add']").forEach(btn => {
+      btn.addEventListener("click", () => quickAddRecurringOccurrence(btn.dataset.recId, btn.dataset.due));
+    });
+  }
+
+  // One tap creates the transaction immediately when the schedule has a
+  // saved amount (a fixed bill like rent). When it doesn't — a variable
+  // bill like electricity — the amount is required up front instead of
+  // defaulting to $0: opens the normal Add Transaction sheet, prefilled
+  // from the schedule and tagged so Save links it to this occurrence.
+  function quickAddRecurringOccurrence(recId, due) {
+    const rec = recurring.find(r => r.id === recId);
+    if (!rec) return;
+    if (rec.amount == null) {
+      openRecurringOccurrenceSheet(rec, due);
+      return;
+    }
+    transactions.push({
+      id: uid(),
+      type: rec.type,
+      amount: rec.amount,
+      category: rec.category,
+      subcategory: rec.subcategory || "",
+      note: rec.note || "",
+      date: due,
+      paymentMethod: rec.paymentMethod || "Cash",
+      account: rec.account || "",
+      recurringId: rec.id,
+      recurringDueDate: due
+    });
+    const saved = saveTransactions();
+    renderAll();
+    if (saved) showToast("Added — tap to edit");
+  }
+
+  function openRecurringOccurrenceSheet(rec, due) {
+    openSheet("add");
+    setType(rec.type);
+    categoryInput.value = rec.category;
+    subcategoryInput.value = rec.subcategory || "";
+    paymentMethodInput.value = rec.paymentMethod || "Cash";
+    accountInput.value = rec.account || "";
+    noteInput.value = rec.note || "";
+    dateInput.value = due;
+    pendingRecurringLink = { recId: rec.id, due };
+  }
+
+  function renderRecurringScreen() {
+    const overdue = buildOverdueOccurrences();
+    const overdueSection = document.getElementById("recurringOverdueSection");
+    const overdueList = document.getElementById("recurringOverdueList");
+    if (overdue.length === 0) {
+      overdueSection.hidden = true;
+      overdueList.innerHTML = "";
+    } else {
+      overdueSection.hidden = false;
+      overdueList.innerHTML = overdue.map(o => renderOccurrenceRow(o, true)).join("");
+      wireRecurringRowActions(overdueList);
+    }
+
+    const monthRows = buildMonthOccurrences(viewYear, viewMonth);
+    const monthList = document.getElementById("recurringMonthList");
+    const emptyEl = document.getElementById("recurringEmpty");
+    if (monthRows.length === 0) {
+      monthList.innerHTML = "";
+      emptyEl.hidden = false;
+      emptyEl.textContent = recurring.length === 0
+        ? "No recurring items yet. Tap Manage to add a monthly bill, salary, or annual subscription."
+        : "Nothing scheduled this month.";
+    } else {
+      emptyEl.hidden = true;
+      monthList.innerHTML = monthRows.map(o => renderOccurrenceRow(o, false)).join("");
+      wireRecurringRowActions(monthList);
+    }
+  }
+
+  // ---------- Manage Recurring screen ----------
+  function renderRecurringDefRow(rec) {
+    const metaParts = [frequencyLabel(rec)];
+    if (rec.note) metaParts.push(rec.note);
+    if (rec.active === false) metaParts.push("Paused");
+    const amountText = rec.amount != null
+      ? (rec.type === "expense" ? "-" : "+") + currencySymbol() + formatNumber(rec.amount)
+      : "—";
+    return `
+      <button class="tx-row" data-id="${rec.id}">
+        <span class="tx-dot ${rec.type}"></span>
+        <span class="tx-main">
+          <span class="tx-category">${escapeHtml(recurringLabel(rec))}</span>
+          <span class="tx-note">${escapeHtml(metaParts.join(" · "))}</span>
+        </span>
+        <span class="${rec.amount != null ? `tx-amount ${rec.type} mono` : "tx-amount mono"}">${amountText}</span>
+      </button>
+    `;
+  }
+
+  function renderManageRecurringScreen() {
+    const listEl = document.getElementById("recurringDefList");
+    if (recurring.length === 0) {
+      listEl.innerHTML = `<p class="empty-state">No recurring items yet. Tap + Add to set up a monthly bill, salary, or annual subscription.</p>`;
+      return;
+    }
+    listEl.innerHTML = recurring.map(renderRecurringDefRow).join("");
+    listEl.querySelectorAll(".tx-row").forEach(row => {
+      row.addEventListener("click", () => openRecurringSheet("edit", row.dataset.id));
+    });
+  }
+
+  // ---------- Recurring sheet (add/edit a schedule) ----------
+  const recurringBackdrop = document.getElementById("recurringSheetBackdrop");
+  const recurringForm = document.getElementById("recurringForm");
+  const recurringSheetTitle = document.getElementById("recurringSheetTitle");
+  const recurringCategoryInput = document.getElementById("recurringCategoryInput");
+  const recurringSubcategoryInput = document.getElementById("recurringSubcategoryInput");
+  const recurringPaymentMethodInput = document.getElementById("recurringPaymentMethodInput");
+  const recurringAccountInput = document.getElementById("recurringAccountInput");
+  const recurringNoteInput = document.getElementById("recurringNoteInput");
+  const recurringAmountInput = document.getElementById("recurringAmountInput");
+  const recurringMonthField = document.getElementById("recurringMonthField");
+  const recurringMonthInput = document.getElementById("recurringMonthInput");
+  const recurringDayField = document.getElementById("recurringDayField");
+  const recurringDayInput = document.getElementById("recurringDayInput");
+  const recurringDay2Field = document.getElementById("recurringDay2Field");
+  const recurringDay2Input = document.getElementById("recurringDay2Input");
+  const recurringStartDateInput = document.getElementById("recurringStartDateInput");
+  const recurringEndDateInput = document.getElementById("recurringEndDateInput");
+  const recurringFormError = document.getElementById("recurringFormError");
+  const recurringDeleteBtn = document.getElementById("recurringDeleteBtn");
+  const recurringCancelBtn = document.getElementById("recurringCancelBtn");
+  const addRecurringBtn = document.getElementById("addRecurringBtn");
+
+  setupAutosuggest(recurringSubcategoryInput, document.getElementById("recurringSubcategorySuggestions"), "subcategory");
+  setupAutosuggest(recurringAccountInput, document.getElementById("recurringAccountSuggestions"), "account",
+    wireAccountPaymentMethodAutofill(recurringAccountInput, recurringPaymentMethodInput));
+
+  recurringMonthInput.innerHTML = MONTH_NAMES.map((m, i) => `<option value="${i + 1}">${m}</option>`).join("");
+
+  function populateRecurringCategories() {
+    const list = recurringType === "expense" ? lists.expenseCategories : lists.incomeCategories;
+    recurringCategoryInput.innerHTML = list.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
+  }
+
+  function setRecurringType(type) {
+    recurringType = type;
+    document.querySelectorAll("#recurringTypeToggle .type-btn").forEach(b => b.classList.toggle("active", b.dataset.type === type));
+    populateRecurringCategories();
+  }
+
+  function setRecurringFrequency(freq) {
+    recurringFrequency = freq;
+    document.querySelectorAll("#recurringFrequencyToggle .type-btn").forEach(b => b.classList.toggle("active", b.dataset.frequency === freq));
+    recurringMonthField.hidden = freq !== "annual";
+    recurringDay2Field.hidden = freq !== "semimonthly";
+  }
+
+  function setRecurringActive(active) {
+    recurringActiveChoice = active;
+    document.querySelectorAll("#recurringActiveToggle .type-btn").forEach(b => b.classList.toggle("active", (b.dataset.active === "true") === active));
+  }
+
+  function openRecurringSheet(mode, id) {
+    recurringFormError.hidden = true;
+    if (mode === "edit") {
+      const r = recurring.find(rec => rec.id === id);
+      if (!r) return;
+      editingRecurringId = id;
+      recurringSheetTitle.textContent = "Edit recurring item";
+      setRecurringType(r.type);
+      recurringCategoryInput.value = r.category;
+      recurringSubcategoryInput.value = r.subcategory || "";
+      recurringPaymentMethodInput.value = r.paymentMethod || "Cash";
+      recurringAccountInput.value = r.account || "";
+      recurringNoteInput.value = r.note || "";
+      recurringAmountInput.value = r.amount != null ? r.amount : "";
+      setRecurringFrequency(r.frequency);
+      recurringMonthInput.value = r.anchorMonth || (today.getMonth() + 1);
+      recurringDayInput.value = r.anchorDay;
+      recurringDay2Input.value = r.anchorDay2 || "";
+      recurringStartDateInput.value = r.startDate;
+      recurringEndDateInput.value = r.endDate || "";
+      setRecurringActive(r.active !== false);
+      recurringDeleteBtn.hidden = false;
+    } else {
+      editingRecurringId = null;
+      recurringSheetTitle.textContent = "Add recurring item";
+      setRecurringType("expense");
+      recurringSubcategoryInput.value = "";
+      recurringPaymentMethodInput.value = "Cash";
+      recurringAccountInput.value = "";
+      recurringNoteInput.value = "";
+      recurringAmountInput.value = "";
+      setRecurringFrequency("monthly");
+      recurringMonthInput.value = today.getMonth() + 1;
+      recurringDayInput.value = "";
+      recurringDay2Input.value = "";
+      recurringStartDateInput.value = todayISO();
+      recurringEndDateInput.value = "";
+      setRecurringActive(true);
+      recurringDeleteBtn.hidden = true;
+    }
+    recurringBackdrop.classList.add("open");
+  }
+
+  function closeRecurringSheet() {
+    recurringBackdrop.classList.remove("open");
+  }
+
+  addRecurringBtn.addEventListener("click", () => openRecurringSheet("add"));
+  recurringCancelBtn.addEventListener("click", closeRecurringSheet);
+  recurringBackdrop.addEventListener("click", (e) => { if (e.target === recurringBackdrop) closeRecurringSheet(); });
+
+  document.getElementById("recurringTypeToggle").addEventListener("click", (e) => {
+    const btn = e.target.closest(".type-btn");
+    if (btn) setRecurringType(btn.dataset.type);
+  });
+  document.getElementById("recurringFrequencyToggle").addEventListener("click", (e) => {
+    const btn = e.target.closest(".type-btn");
+    if (btn) setRecurringFrequency(btn.dataset.frequency);
+  });
+  document.getElementById("recurringActiveToggle").addEventListener("click", (e) => {
+    const btn = e.target.closest(".type-btn");
+    if (btn) setRecurringActive(btn.dataset.active === "true");
+  });
+
+  recurringForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const category = recurringCategoryInput.value;
+    const subcategory = recurringSubcategoryInput.value.trim();
+    const paymentMethod = recurringPaymentMethodInput.value;
+    const account = recurringAccountInput.value.trim();
+    const note = recurringNoteInput.value.trim();
+    const amountRaw = recurringAmountInput.value.trim();
+    const startDate = recurringStartDateInput.value;
+    const endDate = recurringEndDateInput.value;
+
+    let amount = null;
+    if (amountRaw !== "") {
+      const parsed = parseFloat(amountRaw);
+      if (isNaN(parsed) || parsed <= 0) {
+        recurringFormError.textContent = "Amount must be greater than 0, or left blank.";
+        recurringFormError.hidden = false;
+        recurringAmountInput.focus();
+        return;
+      }
+      amount = parsed;
+    }
+
+    const day = parseInt(recurringDayInput.value, 10);
+    if (!day || day < 1 || day > 31) {
+      recurringFormError.textContent = "Enter a day of month between 1 and 31.";
+      recurringFormError.hidden = false;
+      recurringDayInput.focus();
+      return;
+    }
+
+    let day2 = null;
+    if (recurringFrequency === "semimonthly") {
+      day2 = parseInt(recurringDay2Input.value, 10);
+      if (!day2 || day2 < 1 || day2 > 31) {
+        recurringFormError.textContent = "Enter a second day of month between 1 and 31.";
+        recurringFormError.hidden = false;
+        recurringDay2Input.focus();
+        return;
+      }
+    }
+
+    let month = null;
+    if (recurringFrequency === "annual") {
+      month = parseInt(recurringMonthInput.value, 10);
+    }
+
+    if (!startDate) {
+      recurringFormError.textContent = "Choose a start date.";
+      recurringFormError.hidden = false;
+      recurringStartDateInput.focus();
+      return;
+    }
+    if (endDate && endDate < startDate) {
+      recurringFormError.textContent = "End date can't be before the start date.";
+      recurringFormError.hidden = false;
+      recurringEndDateInput.focus();
+      return;
+    }
+
+    const isEdit = !!editingRecurringId;
+    const fields = {
+      type: recurringType, category, subcategory, paymentMethod, account, note, amount,
+      frequency: recurringFrequency, anchorDay: day, anchorDay2: day2, anchorMonth: month,
+      startDate, endDate: endDate || null, active: recurringActiveChoice
+    };
+    if (editingRecurringId) {
+      const r = recurring.find(rec => rec.id === editingRecurringId);
+      Object.assign(r, fields);
+    } else {
+      recurring.push({ id: uid(), ...fields });
+    }
+    const saved = saveRecurring();
+    closeRecurringSheet();
+    renderManageRecurringScreen();
+    if (currentScreen === "recurring") renderRecurringScreen();
+    if (saved) showToast(isEdit ? "Recurring item updated" : "Recurring item saved");
+  });
+
+  recurringDeleteBtn.addEventListener("click", () => {
+    if (!editingRecurringId) return;
+    recurring = recurring.filter(r => r.id !== editingRecurringId);
+    const saved = saveRecurring();
+    closeRecurringSheet();
+    renderManageRecurringScreen();
+    if (currentScreen === "recurring") renderRecurringScreen();
+    if (saved) showToast("Recurring item deleted");
+  });
 
   // ---------- Sheet (add/edit form) ----------
   const backdrop = document.getElementById("sheetBackdrop");
@@ -993,6 +1485,7 @@
 
   function closeSheet() {
     backdrop.classList.remove("open");
+    pendingRecurringLink = null;
   }
 
   addBtn.addEventListener("click", () => openSheet("add"));
@@ -1050,7 +1543,7 @@
       const tx = transactions.find(t => t.id === editingId);
       Object.assign(tx, { type: currentType, amount, category, subcategory, note: noteInput.value.trim(), date, paymentMethod, account });
     } else {
-      transactions.push({
+      const newTx = {
         id: uid(),
         type: currentType,
         amount,
@@ -1060,7 +1553,12 @@
         date,
         paymentMethod,
         account
-      });
+      };
+      if (pendingRecurringLink) {
+        newTx.recurringId = pendingRecurringLink.recId;
+        newTx.recurringDueDate = pendingRecurringLink.due;
+      }
+      transactions.push(newTx);
     }
     const saved = saveTransactions();
     closeSheet();
@@ -2170,6 +2668,8 @@
     populatePaymentMethodOptions(billPaymentMethodInput);
     populateTemplateCategories();
     populatePaymentMethodOptions(templatePaymentMethodInput);
+    populateRecurringCategories();
+    populatePaymentMethodOptions(recurringPaymentMethodInput);
   }
 
   // List sections start collapsed (each panel already carries `hidden` in
@@ -2200,6 +2700,16 @@
     if (viewMonth > 11) { viewMonth = 0; viewYear++; }
     renderAll();
   });
+  document.getElementById("prevRecurringMonth").addEventListener("click", () => {
+    viewMonth--;
+    if (viewMonth < 0) { viewMonth = 11; viewYear--; }
+    renderAll();
+  });
+  document.getElementById("nextRecurringMonth").addEventListener("click", () => {
+    viewMonth++;
+    if (viewMonth > 11) { viewMonth = 0; viewYear++; }
+    renderAll();
+  });
 
   // ---------- Init ----------
   populateCategories();
@@ -2208,6 +2718,8 @@
   populatePaymentMethodOptions(templatePaymentMethodInput);
   populateTemplateCategories();
   populateTemplatePicker();
+  populatePaymentMethodOptions(recurringPaymentMethodInput);
+  populateRecurringCategories();
   renderAll();
 
   // ---------- Service worker ----------
