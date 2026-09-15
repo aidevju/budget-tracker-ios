@@ -4,7 +4,7 @@
   // Minor number must match the number in service-worker.js's CACHE_NAME
   // (e.g. "ledger-cache-v21" -> "1.21") — bump both together whenever
   // CACHE_NAME is bumped.
-  const APP_VERSION = "1.23";
+  const APP_VERSION = "1.24";
 
   const STORAGE_KEY = "ledger_transactions_v1";
   const SETTINGS_KEY = "ledger_settings_v1";
@@ -81,6 +81,7 @@
   let recurringType = "expense"; // independent from currentType/templateType — its own type toggle
   let recurringFrequency = "monthly";
   let recurringActiveChoice = true;
+  let pendingRecurringLink = null; // { recId, due } while the transaction sheet is open to fill in an amount-less occurrence's amount
 
   // ---------- Storage ----------
   function loadTransactions() {
@@ -1072,17 +1073,22 @@
     });
   }
 
-  // One tap creates the transaction immediately — using the schedule's
-  // saved amount if it has one, or $0 to fill in later — so a variable
-  // bill like electricity can be logged now and corrected via its normal
-  // edit sheet once the actual amount is known.
+  // One tap creates the transaction immediately when the schedule has a
+  // saved amount (a fixed bill like rent). When it doesn't — a variable
+  // bill like electricity — the amount is required up front instead of
+  // defaulting to $0: opens the normal Add Transaction sheet, prefilled
+  // from the schedule and tagged so Save links it to this occurrence.
   function quickAddRecurringOccurrence(recId, due) {
     const rec = recurring.find(r => r.id === recId);
     if (!rec) return;
+    if (rec.amount == null) {
+      openRecurringOccurrenceSheet(rec, due);
+      return;
+    }
     transactions.push({
       id: uid(),
       type: rec.type,
-      amount: rec.amount != null ? rec.amount : 0,
+      amount: rec.amount,
       category: rec.category,
       subcategory: rec.subcategory || "",
       note: rec.note || "",
@@ -1094,7 +1100,19 @@
     });
     const saved = saveTransactions();
     renderAll();
-    if (saved) showToast(rec.amount != null ? "Added — tap to edit" : "Added with $0 — tap to set the amount");
+    if (saved) showToast("Added — tap to edit");
+  }
+
+  function openRecurringOccurrenceSheet(rec, due) {
+    openSheet("add");
+    setType(rec.type);
+    categoryInput.value = rec.category;
+    subcategoryInput.value = rec.subcategory || "";
+    paymentMethodInput.value = rec.paymentMethod || "Cash";
+    accountInput.value = rec.account || "";
+    noteInput.value = rec.note || "";
+    dateInput.value = due;
+    pendingRecurringLink = { recId: rec.id, due };
   }
 
   function renderRecurringScreen() {
@@ -1467,6 +1485,7 @@
 
   function closeSheet() {
     backdrop.classList.remove("open");
+    pendingRecurringLink = null;
   }
 
   addBtn.addEventListener("click", () => openSheet("add"));
@@ -1524,7 +1543,7 @@
       const tx = transactions.find(t => t.id === editingId);
       Object.assign(tx, { type: currentType, amount, category, subcategory, note: noteInput.value.trim(), date, paymentMethod, account });
     } else {
-      transactions.push({
+      const newTx = {
         id: uid(),
         type: currentType,
         amount,
@@ -1534,7 +1553,12 @@
         date,
         paymentMethod,
         account
-      });
+      };
+      if (pendingRecurringLink) {
+        newTx.recurringId = pendingRecurringLink.recId;
+        newTx.recurringDueDate = pendingRecurringLink.due;
+      }
+      transactions.push(newTx);
     }
     const saved = saveTransactions();
     closeSheet();
