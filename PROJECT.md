@@ -7,10 +7,11 @@ Apple Developer account, and no Mac required.
 ## What it is
 
 - Add income and expenses with a category, optional note, and date.
-- Four screens, swapped in place via a bottom tab bar (no page
+- Five screens, swapped in place via a bottom tab bar (no page
   navigation, no router — no top app bar either, the tab bar is the
-  only persistent chrome), plus one drill-down screen (Credit Card
-  Bills) reached from Dashboard rather than the tab bar:
+  only persistent chrome), plus two drill-down screens (Credit Card
+  Bills, Manage Recurring) reached from Dashboard/Recurring rather
+  than the tab bar:
   - **Month** (default tab): prev/next month navigation, a
     receipt-styled balance summary, monthly expense target progress,
     a category breakdown (expenses only), a day-grouped transaction
@@ -33,6 +34,38 @@ Apple Developer account, and no Mac required.
     charges it reconciled — read-only, no tap-to-edit. Reuses the same
     linked-charge row rendering as the "Includes N charges" block in
     the transaction edit sheet.
+  - **Recurring**: a month-scoped view of scheduled income/expense
+    occurrences (electricity due monthly, salary twice a month, an
+    annual subscription, etc.), generated from `ledger_recurring_v1`
+    schedules rather than stored one-by-one. Has its own prev/next
+    month navigation sharing the same `viewYear`/`viewMonth` state as
+    Month/Dashboard. An **Overdue** card (hidden entirely when empty,
+    same convention as the Credit Cards panel) lists every unpaid
+    occurrence due before today across *all* past months — not just
+    the viewed one — so a missed bill stays visible until it's paid,
+    independent of month navigation. Below that, **This month** lists
+    every occurrence for the viewed month: a paid one (a transaction
+    already links to it) shows its actual amount and tapping it opens
+    that transaction in the normal edit sheet; an unpaid one shows an
+    "Add" button that creates the transaction immediately — using the
+    schedule's saved amount, or $0 if none was set, to be corrected
+    later via that same edit sheet. A "Manage" header link opens the
+    **Manage Recurring** screen (below).
+  - **Manage Recurring** (drill-down, reached only via "Manage" on the
+    Recurring tab, not part of the tab bar): a back arrow returns to
+    Recurring. Lists every recurring schedule (active and paused);
+    tapping one opens the add/edit sheet, with Delete inside that
+    sheet. The sheet configures the same fields as a Template (type,
+    category, subcategory, payment method, account, note, optional
+    amount) plus a schedule: frequency (Monthly / 2x Monthly / Annual),
+    the day(s) of month it falls on (a day past a shorter month's end
+    clamps to that month's last day — a "day 31" monthly schedule just
+    lands on the 30th in April), a month too for Annual, a start date
+    (occurrences before it are never generated — lets a schedule
+    created mid-cycle skip a since-passed occurrence unless
+    backdated), an optional end date, and an Active/Paused toggle
+    (paused schedules stop generating new occurrences but existing
+    linked transactions are untouched).
   - **Templates**: a flat, dateless list of recurring income/expense
     presets (category, subcategory, payment method, account, note,
     and an optional amount), each shown with a "—" when no amount is
@@ -55,15 +88,16 @@ Apple Developer account, and no Mac required.
     required columns are just Type and Category, Amount is optional),
     and an editable-lists section
     for Expense Categories / Income Categories / Payment Methods (add,
-    rename — cascades to existing transactions *and* templates — and
-    delete, blocked while a value is still in use by either), each
+    rename — cascades to existing transactions, templates, *and*
+    recurring items — and delete, blocked while a value is still in
+    use by any of the three), each
     collapsed by default to keep the screen from being dominated by
     long lists. A full tab/screen, not a popup sheet, for consistency
     with the other tabs. A version number ("Ledger vX.Y.Z") is shown
     at the bottom of the screen, hardcoded in `index.html`.
 - The floating "+" add-transaction button only shows on the Month
-  tab (hidden on Dashboard/Credit Card Bills/Templates/Settings), positioned above the
-  tab bar.
+  tab (hidden on Dashboard/Credit Card Bills/Recurring/Manage
+  Recurring/Templates/Settings), positioned above the tab bar.
 - Export downloads the currently viewed month as a CSV file (summary,
   category breakdown, then the full transaction list) — opens
   directly in Excel, Numbers, or Google Sheets. No `.xlsx` export,
@@ -110,12 +144,13 @@ static host.
 
 ```
 budget-tracker/
-├── index.html          Page shell: Month/Dashboard/Templates/Settings
-│                        screens plus the bottom tab bar, the add/edit
-│                        transaction sheet, the Pay Card Bill sheet, the
-│                        add/edit template sheet, the Import CSV preview
+├── index.html          Page shell: Month/Dashboard/Recurring/Templates/
+│                        Settings screens plus the bottom tab bar, the
+│                        add/edit transaction sheet, the Pay Card Bill
+│                        sheet, the add/edit template sheet, the add/edit
+│                        recurring-item sheet, the Import CSV preview
 │                        sheet, and the Import Templates preview sheet
-│                        (five modals now, same open/close mechanics),
+│                        (six modals now, same open/close mechanics),
 │                        the template picker inside the
 │                        transaction sheet, plus a custom autosuggest
 │                        dropdown for subcategory/account. Screens are
@@ -144,7 +179,8 @@ Stored client-side in `localStorage`, nothing leaves the device.
   ```js
   { id, type: "income" | "expense", amount: number, category: string,
     subcategory: string, note: string, date: "YYYY-MM-DD",
-    paymentMethod: string, account: string, reconciledBillId?: string }
+    paymentMethod: string, account: string, reconciledBillId?: string,
+    recurringId?: string, recurringDueDate?: "YYYY-MM-DD" }
   ```
   `subcategory` and `account` are optional freeform text — no fixed
   taxonomy, just a custom autosuggest dropdown (`setupAutosuggest()` in
@@ -156,7 +192,11 @@ Stored client-side in `localStorage`, nothing leaves the device.
   present only on a Credit-Card expense that's been linked, via the
   Pay Card Bill flow, to the expense transaction that settled it; its
   *absence* is what makes a charge "unbilled" — there's no separate
-  status field.
+  status field. `recurringId`/`recurringDueDate` are optional and set
+  together — present only on a transaction created from the Recurring
+  tab's "Add" button, pointing back at the `ledger_recurring_v1` item
+  and the exact occurrence date it fulfills; deleting the transaction
+  simply makes that occurrence unpaid again, no unlinking step needed.
 - `ledger_settings_v1` — JSON object:
   ```js
   { theme: "light" | "dark" | "system", currency: "none" | "USD" | "PHP" | ...,
@@ -181,6 +221,30 @@ Stored client-side in `localStorage`, nothing leaves the device.
   one-time copy into a new, independent transaction — deliberately
   **no** persistent link back, unlike `reconciledBillId` above, since
   there's no "settlement" concept for templates.
+- `ledger_recurring_v1` — JSON array of:
+  ```js
+  { id, type: "income" | "expense", category: string, subcategory: string,
+    paymentMethod: string, account: string, note: string, amount: number | null,
+    frequency: "monthly" | "semimonthly" | "annual",
+    anchorDay: number, anchorDay2: number | null, anchorMonth: number | null,
+    startDate: "YYYY-MM-DD", endDate: "YYYY-MM-DD" | null, active: boolean }
+  ```
+  Same preset shape as a template (including a nullable `amount`), plus
+  a schedule. `anchorDay` is 1-31 for every frequency; `anchorDay2` is
+  only set for `semimonthly` (the second day of the month); `anchorMonth`
+  is only set for `annual` (1-12). There's no stored list of individual
+  occurrences — `occurrencesInRange()` in `app.js` derives them
+  deterministically from the schedule for whatever date range the
+  Recurring tab needs (clamping `anchorDay`/`anchorDay2` to a shorter
+  month's last day), and each occurrence's identity *is* its computed
+  due date. Whether one is "paid" is never stored on the recurring item
+  either — it's just whether some transaction's `recurringId` +
+  `recurringDueDate` matches that (item, due date) pair. `startDate`
+  clips off any occurrence before it (so creating a schedule mid-cycle
+  doesn't retroactively surface an already-passed occurrence unless
+  backdated); `endDate` is optional. `active: false` (Paused in the UI)
+  stops new occurrences from being generated at all — existing linked
+  transactions are unaffected — without deleting the schedule.
 - `ledger_lists_v1` — JSON object:
   ```js
   { expenseCategories: string[], incomeCategories: string[],
@@ -190,9 +254,9 @@ Stored client-side in `localStorage`, nothing leaves the device.
   ```
   Backs the Category and Payment Method dropdowns — editable from
   Settings (add / rename-with-cascade / delete-if-unused, where usage
-  is checked and cascaded across both `ledger_transactions_v1` *and*
-  `ledger_templates_v1`) instead of hardcoded constants. Seeded from
-  the app's defaults the first time
+  is checked and cascaded across `ledger_transactions_v1`,
+  `ledger_templates_v1`, *and* `ledger_recurring_v1`) instead of
+  hardcoded constants. Seeded from the app's defaults the first time
   it's read if the key doesn't exist yet, so existing installs see
   identical dropdowns and colors after upgrading. Each expense
   category's chart color is looked up by a persisted `colorSlot`

@@ -130,6 +130,51 @@
     <p class="empty-state" id="billHistoryEmpty" hidden>No credit card bills paid yet.</p>
   </div>
 
+  <!-- Recurring screen: month-scoped view of scheduled income/expense
+       occurrences (electricity every month, salary twice a month, an
+       annual subscription, etc.) generated from ledger_recurring_v1. -->
+  <div id="recurringScreen" hidden>
+    <header class="month-bar">
+      <button class="icon-btn" id="prevRecurringMonth" aria-label="Previous month">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="22" height="22"><path d="M15 6l-6 6 6 6"/></svg>
+      </button>
+      <h1 id="recurringMonthLabel">August 2026</h1>
+      <button class="icon-btn" id="nextRecurringMonth" aria-label="Next month">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="22" height="22"><path d="M9 6l6 6-6 6"/></svg>
+      </button>
+    </header>
+
+    <div class="list-header-row">
+      <h2 class="recurring-section-title">Scheduled</h2>
+      <button type="button" class="link-btn" id="manageRecurringBtn">Manage</button>
+    </div>
+
+    <section class="recurring-overdue-section" id="recurringOverdueSection" hidden>
+      <h2 class="recurring-section-title">Overdue</h2>
+      <div id="recurringOverdueList" class="tx-list"></div>
+    </section>
+
+    <section>
+      <h2 class="recurring-section-title">This month</h2>
+      <div id="recurringMonthList" class="tx-list"></div>
+      <p class="empty-state" id="recurringEmpty" hidden></p>
+    </section>
+  </div>
+
+  <!-- Manage Recurring screen: drill-down from the Recurring tab, not part
+       of the tab bar. Add/edit/delete the recurring item definitions
+       themselves (category, amount, frequency, schedule, start/end dates). -->
+  <div id="manageRecurringScreen" hidden>
+    <header class="subscreen-header">
+      <button type="button" class="icon-btn" id="manageRecurringBackBtn" aria-label="Back to Recurring">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="22" height="22"><path d="M15 6l-6 6 6 6"/></svg>
+      </button>
+      <h1>Manage Recurring</h1>
+      <button type="button" class="link-btn subscreen-header-action" id="addRecurringBtn">+ Add</button>
+    </header>
+    <div id="recurringDefList" class="tx-list"></div>
+  </div>
+
   <!-- Templates screen: manage recurring-expense/income templates -->
   <div id="templatesScreen" hidden>
     <div class="list-header-row">
@@ -193,7 +238,7 @@
       </button>
       <div class="list-editor" id="paymentMethodListMgmt" hidden></div>
     </div>
-    <p class="settings-caption">Renaming a value updates existing transactions automatically. A value in use by any transaction can't be deleted.</p>
+    <p class="settings-caption">Renaming a value updates existing transactions, templates, and recurring items automatically. A value still in use can't be deleted.</p>
 
     <div class="settings-group settings-group-data">
       <span class="settings-label">Data</span>
@@ -225,6 +270,10 @@
     <button type="button" class="tab" data-screen="dashboard" aria-label="Dashboard">
       <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 19V11"/><path d="M12 19V5"/><path d="M19 19v-6"/></svg></span>
       <span class="lb">Dashboard</span>
+    </button>
+    <button type="button" class="tab" data-screen="recurring" aria-label="Recurring">
+      <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2"/><path d="M9 2h6"/></svg></span>
+      <span class="lb">Recurring</span>
     </button>
     <button type="button" class="tab" data-screen="templates" aria-label="Templates">
       <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg></span>
@@ -414,6 +463,105 @@
         <button type="button" class="btn-text" id="templateDeleteBtn" hidden>Delete</button>
         <div class="sheet-actions-right">
           <button type="button" class="btn-secondary" id="templateCancelBtn">Cancel</button>
+          <button type="submit" class="btn-primary">Save</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Add / edit recurring/scheduled item sheet -->
+<div class="sheet-backdrop" id="recurringSheetBackdrop">
+  <div class="sheet" id="recurringSheet" role="dialog" aria-modal="true" aria-labelledby="recurringSheetTitle">
+    <div class="sheet-handle"></div>
+    <h2 id="recurringSheetTitle">Add recurring item</h2>
+
+    <div class="type-toggle" id="recurringTypeToggle">
+      <button type="button" class="type-btn active" data-type="expense">Expense</button>
+      <button type="button" class="type-btn" data-type="income">Income</button>
+    </div>
+
+    <form id="recurringForm">
+      <label class="field">
+        <span>Category</span>
+        <select id="recurringCategoryInput" required></select>
+      </label>
+
+      <label class="field autosuggest-field">
+        <span>Subcategory (optional)</span>
+        <input type="text" id="recurringSubcategoryInput" autocomplete="off" maxlength="60" placeholder="e.g. Groceries">
+        <div class="autosuggest-list" id="recurringSubcategorySuggestions" hidden></div>
+      </label>
+
+      <label class="field">
+        <span>Payment method</span>
+        <select id="recurringPaymentMethodInput" required></select>
+      </label>
+
+      <label class="field autosuggest-field">
+        <span>Account (optional)</span>
+        <input type="text" id="recurringAccountInput" autocomplete="off" maxlength="60" placeholder="e.g. BDO, HSBC -CC">
+        <div class="autosuggest-list" id="recurringAccountSuggestions" hidden></div>
+      </label>
+
+      <label class="field">
+        <span>Note (optional)</span>
+        <input type="text" id="recurringNoteInput" placeholder="What is it for?" maxlength="60">
+      </label>
+
+      <label class="field">
+        <span>Amount (optional)</span>
+        <input type="number" id="recurringAmountInput" inputmode="decimal" step="0.01" min="0" placeholder="Leave blank to fill in each time">
+      </label>
+
+      <div class="settings-group">
+        <span class="settings-label">Frequency</span>
+        <div class="type-toggle" id="recurringFrequencyToggle">
+          <button type="button" class="type-btn active" data-frequency="monthly">Monthly</button>
+          <button type="button" class="type-btn" data-frequency="semimonthly">2x Monthly</button>
+          <button type="button" class="type-btn" data-frequency="annual">Annual</button>
+        </div>
+      </div>
+
+      <label class="field" id="recurringMonthField" hidden>
+        <span>Month</span>
+        <select id="recurringMonthInput"></select>
+      </label>
+
+      <label class="field" id="recurringDayField">
+        <span>Day of month</span>
+        <input type="number" id="recurringDayInput" inputmode="numeric" min="1" max="31" step="1" placeholder="e.g. 15" required>
+      </label>
+
+      <label class="field" id="recurringDay2Field" hidden>
+        <span>Second day of month</span>
+        <input type="number" id="recurringDay2Input" inputmode="numeric" min="1" max="31" step="1" placeholder="e.g. 30">
+      </label>
+
+      <label class="field">
+        <span>Start date</span>
+        <input type="date" id="recurringStartDateInput" required>
+      </label>
+
+      <label class="field">
+        <span>End date (optional)</span>
+        <input type="date" id="recurringEndDateInput">
+      </label>
+
+      <div class="settings-group">
+        <span class="settings-label">Status</span>
+        <div class="type-toggle" id="recurringActiveToggle">
+          <button type="button" class="type-btn active" data-active="true">Active</button>
+          <button type="button" class="type-btn" data-active="false">Paused</button>
+        </div>
+      </div>
+
+      <p class="form-error" id="recurringFormError" hidden></p>
+
+      <div class="sheet-actions">
+        <button type="button" class="btn-text" id="recurringDeleteBtn" hidden>Delete</button>
+        <div class="sheet-actions-right">
+          <button type="button" class="btn-secondary" id="recurringCancelBtn">Cancel</button>
           <button type="submit" class="btn-primary">Save</button>
         </div>
       </div>

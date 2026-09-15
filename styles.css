@@ -558,6 +558,9 @@ h1, h2 { margin: 0; font-weight: 600; }
   padding: 10px 22px max(22px, env(safe-area-inset-bottom));
   transform: translateY(100%);
   transition: transform 0.25s ease;
+  max-height: 85vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 .sheet-backdrop.open .sheet { transform: translateY(0); }
 .sheet-handle {
@@ -807,6 +810,21 @@ h1, h2 { margin: 0; font-weight: 600; }
 .bill-history-item .linked-charge-row .bill-candidate-amount { font-size: 12.5px; color: var(--ink); }
 
 .bill-history-none { font-size: 13px; color: var(--ink-soft); margin: 0 0 14px 35px; }
+
+/* Recurring tab: month-scoped occurrences + the Manage Recurring drill-down */
+.subscreen-header-action { margin-left: auto; flex-shrink: 0; }
+.recurring-section-title {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+  margin: 18px 0 12px;
+}
+.recurring-section-title:first-child { margin-top: 0; }
+.recurring-overdue-section { margin-bottom: 8px; }
+.recurring-unpaid-row { cursor: default; }
+.recurring-add-btn { flex-shrink: 0; padding: 7px 14px; font-size: 13px; }
+.recurring-overdue-note { color: var(--warning); }
 
 /* Settings: editable dropdown lists (categories / payment methods) */
 .list-editor { display: flex; flex-direction: column; }
