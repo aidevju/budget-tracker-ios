@@ -258,6 +258,19 @@
 
 <!-- Bottom chrome: floating add button + tab bar -->
 <div class="bottom-chrome">
+  <div class="voice-panel" id="voicePanel" role="status" aria-live="polite" hidden>
+    <div class="voice-panel-status"><span class="voice-dot"></span><span id="voicePanelLabel">Listening…</span></div>
+    <p class="voice-panel-transcript" id="voiceTranscript">Try “250 on groceries with BDO yesterday”</p>
+    <div class="voice-panel-actions">
+      <button type="button" class="link-btn" id="voiceCancelBtn">Cancel</button>
+      <button type="button" class="link-btn voice-done-btn" id="voiceDoneBtn">Done</button>
+    </div>
+  </div>
+
+  <button class="fab fab-mic" id="micBtn" aria-label="Add transaction by voice" hidden>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><line x1="12" y1="17.5" x2="12" y2="21"/></svg>
+  </button>
+
   <button class="fab" id="addBtn" aria-label="Add transaction">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
   </button>
@@ -291,6 +304,7 @@
   <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
     <div class="sheet-handle"></div>
     <h2 id="sheetTitle">Add transaction</h2>
+    <p class="voice-heard" id="voiceHeard" hidden></p>
 
     <div class="type-toggle" id="typeToggle">
       <button type="button" class="type-btn active" data-type="expense">Expense</button>
