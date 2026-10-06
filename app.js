@@ -4,7 +4,7 @@
   // Minor number must match the number in service-worker.js's CACHE_NAME
   // (e.g. "ledger-cache-v21" -> "1.21") — bump both together whenever
   // CACHE_NAME is bumped.
-  const APP_VERSION = "1.25";
+  const APP_VERSION = "1.26";
 
   const STORAGE_KEY = "ledger_transactions_v1";
   const SETTINGS_KEY = "ledger_settings_v1";
@@ -425,11 +425,117 @@
 
   // Builds a regex matching `value` with optional spaces between every
   // letter/digit and punctuation ignored — so "GCash" matches "g cash" and
-  // "BDO" matches "B D O" as dictation often spells acronyms out.
+  // "BDO" matches "B D O" as dictation often spells acronyms out. Singular
+  // and plural forms match each other ("grocery" = "Groceries").
   function looseValueRegExp(value) {
     const chars = value.toLowerCase().replace(/[^a-z0-9]/g, "");
     if (chars.length < 2) return null;
-    return new RegExp("(?<![a-z0-9])" + [...chars].map(escapeRegExp).join("\\s*") + "(?![a-z0-9])", "i");
+    let root = chars;
+    let suffix = "(?:s|es)?";
+    if (chars.length > 3 && /ies$/.test(chars)) { root = chars.slice(0, -3); suffix = "(?:y|ies)"; }
+    else if (chars.length > 3 && /[^aeiou]y$/.test(chars)) { root = chars.slice(0, -1); suffix = "(?:y|ies)"; }
+    else if (chars.length > 3 && /[^s]s$/.test(chars)) { root = chars.slice(0, -1); suffix = "s?"; }
+    return new RegExp("(?<![a-z0-9])" + [...root].map(escapeRegExp).join("\\s*") + suffix + "(?![a-z0-9])", "i");
+  }
+
+  // Reduces a word to a crude singular stem for comparing spoken words
+  // with past notes/subcategories ("groceries" and "grocery" -> "grocer").
+  function voiceStem(word) {
+    let w = word.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (w.length > 3 && w.endsWith("ies")) w = w.slice(0, -3);
+    else if (w.length > 3 && w.endsWith("y")) w = w.slice(0, -1);
+    else if (w.length > 3 && w.endsWith("es") && /(?:ch|sh|x|ss)es$/.test(w)) w = w.slice(0, -2);
+    else if (w.length > 3 && w.endsWith("s") && !w.endsWith("ss")) w = w.slice(0, -1);
+    return w;
+  }
+
+  // Meaningful word stems in a phrase: no glue words, no bare numbers.
+  function voiceKeywords(text) {
+    return [...new Set(String(text || "").split(/\s+/)
+      .filter(w => !VOICE_FILLER.has(w.toLowerCase().replace(/[^a-z]/g, "")))
+      .map(voiceStem)
+      .filter(w => w.length >= 2 && !/^\d+$/.test(w)))];
+  }
+
+  // Picks the habit to copy from past transactions: the most common
+  // category/subcategory/payment method/account combination among the
+  // (up to) 10 most recent of `pool`, ties going to the most recent one —
+  // so a recently changed habit (new card for Grab) wins over old history.
+  function voiceHabit(pool) {
+    const recent = [...pool].sort((a, b) => b.date.localeCompare(a.date) || String(b.id).localeCompare(String(a.id))).slice(0, 10);
+    const counts = new Map();
+    recent.forEach(t => {
+      const key = [t.type, t.category, t.subcategory || "", t.paymentMethod || "", t.account || ""].join("\u0000");
+      if (!counts.has(key)) counts.set(key, { tx: t, n: 0 });
+      counts.get(key).n++;
+    });
+    let best = null;
+    counts.forEach(c => { if (!best || c.n > best.n) best = c; }); // Map keeps first-seen (= most recent) order, so ties stay with the newest
+    return best ? best.tx : null;
+  }
+
+  // Fills fields that weren't said out loud from how similar past entries
+  // were logged. Anything said explicitly constrains the search and is
+  // never overwritten. What gets filled depends on how strong the match is:
+  //  - leftover words match a past note/subcategory ("coffee" -> last
+  //    "Coffee" entry): category, subcategory, payment method, account, type
+  //  - only a spoken subcategory: its category, payment method, account, type
+  //  - only a spoken account: its payment method
+  // A spoken category alone fills nothing more — too many possibilities.
+  // If a spoken payment method/account has never been used for the matched
+  // words ("coffee ... cash" when coffee was always GCash), the words still
+  // supply category/subcategory from the rest of the history.
+  function voiceApplyHistory(result, leftoverText, txs) {
+    const sameText = (a, b) => (a || "").toLowerCase() === (b || "").toLowerCase();
+    const inPool = (t, withPayment) =>
+      (!result.type || t.type === result.type) &&
+      (!result.category || t.category === result.category) &&
+      (!result.subcategory || sameText(t.subcategory, result.subcategory)) &&
+      (!withPayment || !result.paymentMethod || t.paymentMethod === result.paymentMethod) &&
+      (!withPayment || !result.account || sameText(t.account, result.account));
+    const spoken = voiceKeywords(leftoverText);
+    function wordMatches(pool) {
+      let bestScore = 0;
+      let best = [];
+      pool.forEach(t => {
+        const known = new Set(voiceKeywords(`${t.note || ""} ${t.subcategory || ""}`));
+        const score = spoken.filter(w => known.has(w)).length;
+        if (score > bestScore) { bestScore = score; best = []; }
+        if (score > 0 && score === bestScore) best.push(t);
+      });
+      return best;
+    }
+
+    const pool = txs.filter(t => inPool(t, true));
+    let matches = [];
+    let fields = [];
+    if (spoken.length) {
+      matches = wordMatches(pool);
+      if (matches.length) {
+        fields = ["type", "category", "subcategory", "paymentMethod", "account"];
+      } else if (result.paymentMethod || result.account) {
+        matches = wordMatches(txs.filter(t => inPool(t, false)));
+        if (matches.length) fields = ["type", "category", "subcategory"];
+      }
+    }
+    if (!matches.length && result.subcategory) {
+      matches = pool;
+      fields = ["type", "category", "paymentMethod", "account"];
+    } else if (!matches.length && result.account) {
+      matches = pool;
+      fields = ["paymentMethod"];
+    }
+
+    const habit = voiceHabit(matches);
+    if (!habit) {
+      // Spoken subcategory paid a new way: still take its category/type.
+      const sub = result.subcategory && voiceHabit(txs.filter(t => inPool(t, false)));
+      if (sub) ["type", "category"].forEach(f => { if (!result[f]) result[f] = sub[f]; });
+      return;
+    }
+    fields.forEach(f => {
+      if (!result[f] && habit[f]) result[f] = habit[f];
+    });
   }
 
   // Finds the first (longest-name-first) value from `values` present in
@@ -539,37 +645,17 @@
     const accounts = [...new Set(txs.map(t => t.account).filter(Boolean))];
     result.account = voiceMatchValue(state, accounts);
 
-    // A known subcategory also tells us its category (and type) from the
-    // most recent transaction that used it — "groceries" -> Food.
     const subcategories = [...new Set(txs.map(t => t.subcategory).filter(Boolean))];
     result.subcategory = voiceMatchValue(state, subcategories);
-    if (result.subcategory) {
-      const key = result.subcategory.toLowerCase();
-      const past = txs
-        .filter(t => (t.subcategory || "").toLowerCase() === key && (!result.type || t.type === result.type))
-        .sort((a, b) => b.date.localeCompare(a.date))[0];
-      if (past) {
-        result.type = result.type || past.type;
-        result.category = past.category;
-      }
-    }
 
-    if (!result.category) {
-      const ownList = result.type === "income" ? ctx.incomeCategories : ctx.expenseCategories;
-      result.category = voiceMatchValue(state, ownList.filter(notOther));
-      if (!result.category && !result.type) {
-        const incomeCat = voiceMatchValue(state, ctx.incomeCategories.filter(notOther));
-        if (incomeCat) { result.type = "income"; result.category = incomeCat; }
-      }
-    }
-    result.type = result.type || "expense";
-
-    // Account with no spoken payment method: reuse the last method paid via that account.
-    if (result.account && !result.paymentMethod) {
-      const past = txs
-        .filter(t => t.paymentMethod && (t.account || "").toLowerCase() === result.account.toLowerCase())
-        .sort((a, b) => b.date.localeCompare(a.date))[0];
-      if (past) result.paymentMethod = past.paymentMethod;
+    // Spoken category: check the already-known type's list, else expense
+    // then income (an income category name also settles the type).
+    if (result.type) {
+      result.category = voiceMatchValue(state, (result.type === "income" ? ctx.incomeCategories : ctx.expenseCategories).filter(notOther));
+    } else {
+      result.category = voiceMatchValue(state, ctx.expenseCategories.filter(notOther));
+      if (result.category) result.type = "expense";
+      else if ((result.category = voiceMatchValue(state, ctx.incomeCategories.filter(notOther)))) result.type = "income";
     }
 
     result.amount = voiceParseAmount(state);
@@ -582,6 +668,14 @@
     }).filter(Boolean);
     const note = chunks.join(" ").replace(/[.,!?]+$/, "").trim();
     result.note = note ? note.charAt(0).toUpperCase() + note.slice(1) : "";
+
+    voiceApplyHistory(result, note, txs);
+    // Account said but still no payment method: use that account's usual one.
+    if (result.account && !result.paymentMethod) {
+      const habit = voiceHabit(txs.filter(t => t.paymentMethod && (t.account || "").toLowerCase() === result.account.toLowerCase()));
+      if (habit) result.paymentMethod = habit.paymentMethod;
+    }
+    result.type = result.type || "expense";
     return result;
   }
 

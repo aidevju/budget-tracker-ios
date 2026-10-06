@@ -111,13 +111,24 @@ Apple Developer account, and no Mac required.
   spoken dates ("yesterday", "last Friday", "3 days ago", "Oct 3rd",
   "the 30th of September" — a yearless date never lands in the
   future), the user's own payment methods/accounts/subcategories/
-  categories (case- and spacing-insensitive, so "g cash" = GCash and
-  "B D O" = BDO; "Other" is never matched from speech), a known
-  subcategory also fills in its category from the most recent
-  transaction that used it, an account with no spoken payment method
-  reuses that account's last one, then the first number becomes the
+  categories (case-, spacing- and singular/plural-insensitive, so
+  "g cash" = GCash, "B D O" = BDO, "grocery" = Groceries; "Other" is
+  never matched from speech), then the first number becomes the
   amount ("1,200.50", "$80", "3.5k", trailing "pesos"/"dollars"…), and
   leftover words (minus glue words like "on"/"with") become the note.
+  Fields not said out loud are then filled from **history**
+  (`voiceApplyHistory()`): leftover words are compared (stemmed)
+  against past entries' notes and subcategories ("coffee" -> the
+  entries noted "Coffee"/"Starbucks coffee"), constrained by whatever
+  *was* said, and the habit copied is the most common category/
+  subcategory/payment method/account combination among the 10 most
+  recent matches (ties -> newest), so a changed habit wins quickly.
+  A word match fills type, category, subcategory, payment method and
+  account; a spoken subcategory alone fills its category, payment
+  method and account; a spoken account alone fills its payment
+  method; a spoken category alone fills nothing more. Said values are
+  never overwritten — "coffee 150 cash" still gets Food › Cafe from
+  history but keeps Cash even if coffee was always paid by GCash.
   The speech recognition itself is the browser's/OS's — on iOS it may
   go through Apple's servers, and it's unreliable in some iOS versions'
   home-screen (standalone) mode, where it errors with
