@@ -4,7 +4,7 @@
   // Minor number must match the number in service-worker.js's CACHE_NAME
   // (e.g. "ledger-cache-v21" -> "1.21") — bump both together whenever
   // CACHE_NAME is bumped.
-  const APP_VERSION = "1.24";
+  const APP_VERSION = "1.25";
 
   const STORAGE_KEY = "ledger_transactions_v1";
   const SETTINGS_KEY = "ledger_settings_v1";
@@ -403,6 +403,188 @@
     });
   }
 
+  // ---------- Voice entry parsing ----------
+  // Turns a spoken phrase like "250 on groceries with BDO yesterday" into
+  // transaction fields. Pure rule-based matching against the user's own
+  // lists and past transactions — no network/AI. Each matcher "consumes"
+  // the words it used (replaced with "|") so later matchers and the
+  // leftover-words-become-the-note step don't see them again.
+  const VOICE_MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+  const VOICE_WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+  const VOICE_MONTH_RE = "(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)";
+  const VOICE_INCOME_RE = /\b(got paid|received|receive|earned|earn|paycheck|income|refund(?:ed)?|deposit(?:ed)?|sold)\b/i;
+  const VOICE_EXPENSE_RE = /\b(spent|spend|paid|pay|bought|buy|purchased|expense)\b/i;
+  const VOICE_CURRENCY_WORDS = "pesos?|php|dollars?|bucks|usd|euros?|pounds?|rupees?|yen|won|yuan";
+  // Words dropped from the start/end of each leftover chunk before it
+  // becomes the note — "on", "with" etc. are glue around matched fields.
+  const VOICE_FILLER = new Set(["i", "a", "an", "the", "on", "for", "with", "using", "via", "by", "at", "in", "of", "from", "to", "and", "my", "card", "today", "just", "um", "uh"]);
+
+  function escapeRegExp(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  // Builds a regex matching `value` with optional spaces between every
+  // letter/digit and punctuation ignored — so "GCash" matches "g cash" and
+  // "BDO" matches "B D O" as dictation often spells acronyms out.
+  function looseValueRegExp(value) {
+    const chars = value.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (chars.length < 2) return null;
+    return new RegExp("(?<![a-z0-9])" + [...chars].map(escapeRegExp).join("\\s*") + "(?![a-z0-9])", "i");
+  }
+
+  // Finds the first (longest-name-first) value from `values` present in
+  // the working text, consumes it, and returns it. Multi-word values also
+  // match on their first word alone when that word is unique among
+  // `values` ("credit" -> "Credit Card").
+  function voiceMatchValue(state, values) {
+    const candidates = [...new Set(values.filter(Boolean))].sort((a, b) => b.length - a.length);
+    for (const value of candidates) {
+      const re = looseValueRegExp(value);
+      if (re && voiceConsume(state, re)) return value;
+    }
+    for (const value of candidates) {
+      const first = value.split(/\s+/)[0];
+      if (first === value || first.length < 4) continue;
+      const shared = candidates.filter(v => v.split(/\s+/)[0].toLowerCase() === first.toLowerCase());
+      if (shared.length !== 1) continue;
+      const re = looseValueRegExp(first);
+      if (re && voiceConsume(state, re)) return value;
+    }
+    return null;
+  }
+
+  // Runs `re` against the working text; on a match, blanks out the matched
+  // span with "|" and returns the match array.
+  function voiceConsume(state, re) {
+    const m = re.exec(state.work);
+    if (!m) return null;
+    state.work = state.work.slice(0, m.index) + "|".repeat(m[0].length) + state.work.slice(m.index + m[0].length);
+    return m;
+  }
+
+  function voiceDateISO(y, m, d) {
+    const dt = new Date(y, m, d);
+    dt.setMinutes(dt.getMinutes() - dt.getTimezoneOffset());
+    return dt.toISOString().slice(0, 10);
+  }
+
+  // Resolves a month/day with no year to the most recent such date on or
+  // before today — "Dec 30" said in January means last December.
+  function voicePastMonthDay(todayStr, month, day) {
+    const year = Number(todayStr.slice(0, 4));
+    if (day < 1 || day > 31) return null;
+    const iso = voiceDateISO(year, month, Math.min(day, daysInMonth(year, month)));
+    return iso > todayStr ? voiceDateISO(year - 1, month, Math.min(day, daysInMonth(year - 1, month))) : iso;
+  }
+
+  function voiceParseDate(state, todayStr) {
+    let m;
+    if (voiceConsume(state, /\b(?:the\s+)?day before yesterday\b/i)) return shiftDateISO(todayStr, -2);
+    if (voiceConsume(state, /\byesterday\b/i)) return shiftDateISO(todayStr, -1);
+    if (voiceConsume(state, /\btoday\b/i)) return todayStr;
+    if ((m = voiceConsume(state, /\b(\d+|one|two|three|four|five|six|seven)\s+days?\s+ago\b/i))) {
+      const words = ["one", "two", "three", "four", "five", "six", "seven"];
+      const n = /^\d+$/.test(m[1]) ? Number(m[1]) : words.indexOf(m[1].toLowerCase()) + 1;
+      return shiftDateISO(todayStr, -n);
+    }
+    if ((m = voiceConsume(state, new RegExp("\\b(last|this|on)?\\s*(" + VOICE_WEEKDAYS.join("|") + ")\\b", "i")))) {
+      const target = VOICE_WEEKDAYS.indexOf(m[2].toLowerCase());
+      const todayDow = new Date(todayStr + "T00:00:00").getDay();
+      let back = (todayDow - target + 7) % 7;
+      if (back === 0 && (m[1] || "").toLowerCase() === "last") back = 7;
+      return shiftDateISO(todayStr, -back);
+    }
+    // "October 3", "Oct 3rd", "the 3rd of October", "3 October"
+    if ((m = voiceConsume(state, new RegExp("\\b(?:on\\s+)?" + VOICE_MONTH_RE + "\\.?\\s+(?:the\\s+)?(\\d{1,2})(?:st|nd|rd|th)?\\b", "i")))) {
+      return voicePastMonthDay(todayStr, VOICE_MONTHS.indexOf(m[1].slice(0, 3).toLowerCase()), Number(m[2]));
+    }
+    if ((m = voiceConsume(state, new RegExp("\\b(?:on\\s+)?(?:the\\s+)?(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?" + VOICE_MONTH_RE + "\\b", "i")))) {
+      return voicePastMonthDay(todayStr, VOICE_MONTHS.indexOf(m[2].slice(0, 3).toLowerCase()), Number(m[1]));
+    }
+    // "on the 3rd" — this month (or last month if that's still ahead)
+    if ((m = voiceConsume(state, /\b(?:on\s+)?the\s+(\d{1,2})(?:st|nd|rd|th)\b/i))) {
+      return voicePastMonthDay(todayStr, Number(todayStr.slice(5, 7)) - 1, Number(m[1]));
+    }
+    return null;
+  }
+
+  function voiceParseAmount(state) {
+    const re = new RegExp("(?:[$₱€£¥₹₩]\\s*)?(?<![\\d.,])(\\d{1,3}(?:,\\d{3})+|\\d+)(?:\\.(\\d+))?(?:\\s*(k)\\b)?(?:\\s*(?:" + VOICE_CURRENCY_WORDS + ")\\b)?", "i");
+    const m = voiceConsume(state, re);
+    if (!m) return null;
+    let n = Number(m[1].replace(/,/g, "") + (m[2] ? "." + m[2] : ""));
+    if (m[3]) n *= 1000;
+    return n > 0 ? Math.round(n * 100) / 100 : null;
+  }
+
+  // ctx: { expenseCategories, incomeCategories, paymentMethods, transactions, today }
+  // Returns { type, amount, category, subcategory, paymentMethod, account, note, date }
+  // with null for anything not recognized (type defaults to "expense").
+  function parseVoiceTransaction(text, ctx) {
+    const state = { work: String(text || "").replace(/\|/g, " ") };
+    const result = { type: null, amount: null, category: null, subcategory: null, paymentMethod: null, account: null, note: "", date: null };
+
+    if (voiceConsume(state, VOICE_INCOME_RE)) result.type = "income";
+    else if (voiceConsume(state, VOICE_EXPENSE_RE)) result.type = "expense";
+
+    result.date = voiceParseDate(state, ctx.today);
+
+    const notOther = v => v && v.toLowerCase() !== "other";
+    result.paymentMethod = voiceMatchValue(state, ctx.paymentMethods.filter(notOther));
+    if (!result.paymentMethod && voiceConsume(state, /\bcredit\b/i)) {
+      result.paymentMethod = ctx.paymentMethods.find(p => /credit/i.test(p)) || null;
+    }
+
+    const txs = ctx.transactions || [];
+    const accounts = [...new Set(txs.map(t => t.account).filter(Boolean))];
+    result.account = voiceMatchValue(state, accounts);
+
+    // A known subcategory also tells us its category (and type) from the
+    // most recent transaction that used it — "groceries" -> Food.
+    const subcategories = [...new Set(txs.map(t => t.subcategory).filter(Boolean))];
+    result.subcategory = voiceMatchValue(state, subcategories);
+    if (result.subcategory) {
+      const key = result.subcategory.toLowerCase();
+      const past = txs
+        .filter(t => (t.subcategory || "").toLowerCase() === key && (!result.type || t.type === result.type))
+        .sort((a, b) => b.date.localeCompare(a.date))[0];
+      if (past) {
+        result.type = result.type || past.type;
+        result.category = past.category;
+      }
+    }
+
+    if (!result.category) {
+      const ownList = result.type === "income" ? ctx.incomeCategories : ctx.expenseCategories;
+      result.category = voiceMatchValue(state, ownList.filter(notOther));
+      if (!result.category && !result.type) {
+        const incomeCat = voiceMatchValue(state, ctx.incomeCategories.filter(notOther));
+        if (incomeCat) { result.type = "income"; result.category = incomeCat; }
+      }
+    }
+    result.type = result.type || "expense";
+
+    // Account with no spoken payment method: reuse the last method paid via that account.
+    if (result.account && !result.paymentMethod) {
+      const past = txs
+        .filter(t => t.paymentMethod && (t.account || "").toLowerCase() === result.account.toLowerCase())
+        .sort((a, b) => b.date.localeCompare(a.date))[0];
+      if (past) result.paymentMethod = past.paymentMethod;
+    }
+
+    result.amount = voiceParseAmount(state);
+
+    const chunks = state.work.split(/\|+/).map(chunk => {
+      const words = chunk.trim().split(/\s+/).filter(Boolean);
+      while (words.length && VOICE_FILLER.has(words[0].toLowerCase().replace(/[^a-z]/g, ""))) words.shift();
+      while (words.length && VOICE_FILLER.has(words[words.length - 1].toLowerCase().replace(/[^a-z]/g, ""))) words.pop();
+      return words.join(" ");
+    }).filter(Boolean);
+    const note = chunks.join(" ").replace(/[.,!?]+$/, "").trim();
+    result.note = note ? note.charAt(0).toUpperCase() + note.slice(1) : "";
+    return result;
+  }
+
   // ---------- Rendering ----------
   function renderMonthLabel() {
     const label = `${MONTH_NAMES[viewMonth]} ${viewYear}`;
@@ -786,11 +968,17 @@
   const goToTodayBtn = document.getElementById("goToTodayBtn");
   const exportBtn = document.getElementById("exportBtn");
   const addBtn = document.getElementById("addBtn");
+  const micBtn = document.getElementById("micBtn");
+  // Voice entry (see "Voice entry" below) needs the browser's speech
+  // recognition API; without it the mic button simply never shows.
+  const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+  micBtn.hidden = !SpeechRecognitionCtor;
 
   function showScreen(name) {
     currentScreen = name;
     Object.entries(SCREENS).forEach(([key, el]) => { el.hidden = key !== name; });
     addBtn.hidden = name !== "month";
+    micBtn.hidden = name !== "month" || !SpeechRecognitionCtor;
     document.querySelectorAll(".tab").forEach(tab => tab.classList.toggle("active", tab.dataset.screen === name));
     if (name === "dashboard") renderDashboardScreen();
     if (name === "billHistory") renderBillHistoryScreen();
@@ -1398,6 +1586,7 @@
   const sheetTitle = document.getElementById("sheetTitle");
   const linkedChargesSection = document.getElementById("linkedChargesSection");
   const linkedChargesToggle = document.getElementById("linkedChargesToggle");
+  const voiceHeard = document.getElementById("voiceHeard");
   const linkedChargesList = document.getElementById("linkedChargesList");
 
   setupAutosuggest(subcategoryInput, document.getElementById("subcategorySuggestions"), "subcategory");
@@ -1438,8 +1627,9 @@
     `).join("");
   }
 
-  function openSheet(mode, id) {
+  function openSheet(mode, id, { focusAmount = true } = {}) {
     formError.hidden = true;
+    voiceHeard.hidden = true;
     templatePickerField.hidden = mode !== "add";
     if (mode === "edit") {
       const tx = transactions.find(t => t.id === id);
@@ -1480,7 +1670,7 @@
       linkedChargesSection.hidden = true;
     }
     backdrop.classList.add("open");
-    setTimeout(() => amountInput.focus(), 200);
+    if (focusAmount) setTimeout(() => amountInput.focus(), 200);
   }
 
   function closeSheet() {
@@ -1581,6 +1771,116 @@
     closeSheet();
     renderAll();
     if (saved) showToast("Transaction deleted");
+  });
+
+  // ---------- Voice entry ----------
+  // Mic button next to "+": listens via the browser's built-in speech
+  // recognition (Safari's webkitSpeechRecognition on iOS), parses the
+  // phrase with parseVoiceTransaction(), and opens the add sheet pre-filled
+  // for review — never saves on its own. The button stays hidden where the
+  // API doesn't exist.
+  const voicePanel = document.getElementById("voicePanel");
+  const voicePanelLabel = document.getElementById("voicePanelLabel");
+  const voiceTranscript = document.getElementById("voiceTranscript");
+  const VOICE_PLACEHOLDER = voiceTranscript.textContent;
+  let voiceRecognition = null;
+  let voiceText = "";
+  let voiceCancelled = false;
+
+  const VOICE_ERROR_MESSAGES = {
+    "not-allowed": "Voice input isn't allowed — check Microphone and Speech Recognition permissions.",
+    "service-not-allowed": "Voice input isn't available here — check Speech Recognition permissions, or try Ledger in Safari.",
+    "audio-capture": "No microphone found.",
+    "network": "Voice input needs an internet connection.",
+    "no-speech": "Didn't catch anything — try again."
+  };
+
+  function setVoiceUI(listening) {
+    micBtn.classList.toggle("listening", listening);
+    micBtn.setAttribute("aria-label", listening ? "Stop listening" : "Add transaction by voice");
+    voicePanel.hidden = !listening;
+  }
+
+  function startVoiceEntry() {
+    voiceText = "";
+    voiceCancelled = false;
+    voicePanelLabel.textContent = "Listening…";
+    voiceTranscript.textContent = VOICE_PLACEHOLDER;
+    voiceTranscript.classList.add("placeholder");
+
+    const rec = new SpeechRecognitionCtor();
+    rec.lang = navigator.language || "en-US";
+    rec.interimResults = true;
+    rec.continuous = false;
+    rec.maxAlternatives = 1;
+    rec.onresult = (e) => {
+      // iOS doesn't always deliver an isFinal result before "end", so keep
+      // the latest text (interim or final) and use that when listening ends.
+      voiceText = [...e.results].map(r => r[0].transcript).join(" ").trim();
+      if (voiceText) {
+        voiceTranscript.textContent = voiceText;
+        voiceTranscript.classList.remove("placeholder");
+      }
+    };
+    rec.onerror = (e) => {
+      if (e.error === "aborted") return;
+      voiceCancelled = true;
+      showToast(VOICE_ERROR_MESSAGES[e.error] || "Voice input failed — try again.", "error");
+    };
+    rec.onend = () => {
+      voiceRecognition = null;
+      setVoiceUI(false);
+      if (voiceCancelled) return;
+      if (!voiceText) {
+        showToast(VOICE_ERROR_MESSAGES["no-speech"], "error");
+        return;
+      }
+      applyVoiceEntry(voiceText);
+    };
+
+    try {
+      rec.start();
+    } catch (err) {
+      console.error("Speech recognition failed to start", err);
+      showToast("Voice input failed — try again.", "error");
+      return;
+    }
+    voiceRecognition = rec;
+    setVoiceUI(true);
+  }
+
+  function applyVoiceEntry(text) {
+    const parsed = parseVoiceTransaction(text, {
+      expenseCategories: lists.expenseCategories,
+      incomeCategories: lists.incomeCategories,
+      paymentMethods: lists.paymentMethods,
+      transactions,
+      today: todayISO()
+    });
+    openSheet("add", null, { focusAmount: parsed.amount == null });
+    setType(parsed.type);
+    if (parsed.category && [...categoryInput.options].some(o => o.value === parsed.category)) categoryInput.value = parsed.category;
+    if (parsed.paymentMethod && [...paymentMethodInput.options].some(o => o.value === parsed.paymentMethod)) paymentMethodInput.value = parsed.paymentMethod;
+    if (parsed.amount != null) amountInput.value = parsed.amount;
+    if (parsed.subcategory) subcategoryInput.value = parsed.subcategory;
+    if (parsed.account) accountInput.value = parsed.account;
+    if (parsed.note) noteInput.value = parsed.note.slice(0, 60);
+    if (parsed.date) dateInput.value = parsed.date;
+    voiceHeard.textContent = `Heard: “${text}”`;
+    voiceHeard.hidden = false;
+  }
+
+  micBtn.addEventListener("click", () => {
+    if (voiceRecognition) voiceRecognition.stop();
+    else startVoiceEntry();
+  });
+  document.getElementById("voiceDoneBtn").addEventListener("click", () => {
+    if (voiceRecognition) voiceRecognition.stop();
+  });
+  document.getElementById("voiceCancelBtn").addEventListener("click", () => {
+    voiceCancelled = true;
+    if (voiceRecognition) voiceRecognition.abort();
+    setVoiceUI(false);
   });
 
   // ---------- Pay Card Bill sheet ----------

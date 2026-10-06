@@ -511,6 +511,83 @@ h1, h2 { margin: 0; font-weight: 600; }
 .fab:active { transform: scale(0.95); }
 .fab[hidden] { display: none; }
 
+/* Secondary voice-input button, sitting just left of the "+" FAB */
+.fab-mic {
+  right: 88px;
+  bottom: calc(64px + env(safe-area-inset-bottom) + 18px);
+  width: 48px;
+  height: 48px;
+  background: var(--paper-raised);
+  color: var(--ink);
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 3px 10px rgba(32,38,44,0.18);
+}
+.fab-mic svg { width: 22px; height: 22px; }
+.fab-mic.listening {
+  background: var(--expense);
+  border-color: var(--expense);
+  color: var(--paper-raised);
+}
+
+/* Listening panel shown above the FABs while voice input is active */
+.voice-panel {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: calc(64px + env(safe-area-inset-bottom) + 84px);
+  background: var(--paper-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  padding: 14px 16px 12px;
+  box-shadow: 0 6px 20px rgba(32,38,44,0.18);
+}
+.voice-panel[hidden] { display: none; }
+.voice-panel-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.voice-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--expense);
+  animation: voice-pulse 1.2s ease-in-out infinite;
+}
+@keyframes voice-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.7); }
+}
+.voice-panel-transcript {
+  margin: 8px 0 10px;
+  font-size: 16px;
+  line-height: 1.35;
+  color: var(--ink);
+  min-height: 22px;
+}
+.voice-panel-transcript.placeholder { color: var(--ink-soft); }
+.voice-panel-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 18px;
+}
+.voice-panel-actions .link-btn { font-size: 14px; }
+.voice-done-btn { color: var(--ink); font-weight: 600; }
+
+/* "Heard: …" line in the transaction sheet after a voice entry */
+.voice-heard {
+  margin: -8px 0 14px;
+  font-size: 13px;
+  color: var(--ink-soft);
+  font-style: italic;
+}
+.voice-heard[hidden] { display: none; }
+
 .tabbar {
   display: flex;
   background: var(--paper-raised);
@@ -1010,4 +1087,5 @@ h1, h2 { margin: 0; font-weight: 600; }
 @media (prefers-reduced-motion: reduce) {
   .sheet, .sheet-backdrop { transition: none; }
   .toast { transition: none; }
+  .voice-dot { animation: none; }
 }

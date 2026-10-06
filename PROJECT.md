@@ -98,6 +98,30 @@ Apple Developer account, and no Mac required.
 - The floating "+" add-transaction button only shows on the Month
   tab (hidden on Dashboard/Credit Card Bills/Recurring/Manage
   Recurring/Templates/Settings), positioned above the tab bar.
+- **Voice entry**: a smaller mic button sits just left of the "+"
+  (same Month-only visibility, and hidden entirely when the browser
+  has no speech recognition API — `SpeechRecognition` /
+  `webkitSpeechRecognition`). Tapping it shows a "Listening…" panel
+  with the live transcript (Done / Cancel); when listening ends, the
+  phrase is parsed by `parseVoiceTransaction()` in `app.js` and the
+  normal add sheet opens pre-filled, with a "Heard: …" line under the
+  title — it never saves on its own, the user reviews and taps Save.
+  Parsing is plain rule-based matching, no AI/network: income/expense
+  keywords ("received", "salary", "spent", "paid"…), relative and
+  spoken dates ("yesterday", "last Friday", "3 days ago", "Oct 3rd",
+  "the 30th of September" — a yearless date never lands in the
+  future), the user's own payment methods/accounts/subcategories/
+  categories (case- and spacing-insensitive, so "g cash" = GCash and
+  "B D O" = BDO; "Other" is never matched from speech), a known
+  subcategory also fills in its category from the most recent
+  transaction that used it, an account with no spoken payment method
+  reuses that account's last one, then the first number becomes the
+  amount ("1,200.50", "$80", "3.5k", trailing "pesos"/"dollars"…), and
+  leftover words (minus glue words like "on"/"with") become the note.
+  The speech recognition itself is the browser's/OS's — on iOS it may
+  go through Apple's servers, and it's unreliable in some iOS versions'
+  home-screen (standalone) mode, where it errors with
+  "service-not-allowed" (shown as a toast).
 - Export downloads the currently viewed month as a CSV file (summary,
   category breakdown, then the full transaction list) — opens
   directly in Excel, Numbers, or Google Sheets. No `.xlsx` export,
@@ -131,7 +155,9 @@ Apple Developer account, and no Mac required.
   importing the same file twice creates duplicate rows.
 - Fully offline-capable once installed — a service worker caches the
   app shell, and all data lives in the browser's `localStorage` on
-  the user's own device. No backend, no accounts, no network calls.
+  the user's own device. No backend, no accounts, no network calls
+  (other than whatever the OS's speech recognition does during voice
+  entry).
 
 ## Tech stack
 
